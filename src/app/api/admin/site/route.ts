@@ -4,9 +4,9 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { getAuthInfoFromCookie } from '@/lib/auth';
 import { getConfig } from '@/lib/config';
-import { getStorage } from '@/lib/db';
+import { db } from '@/lib/db';
 
-export const runtime = 'edge';
+export const runtime = 'nodejs';
 
 export async function POST(request: NextRequest) {
   const storageType = process.env.NEXT_PUBLIC_STORAGE_TYPE || 'localstorage';
@@ -38,6 +38,8 @@ export async function POST(request: NextRequest) {
       DoubanImageProxyType,
       DoubanImageProxy,
       DisableYellowFilter,
+      FluidSearch,
+      EnableWebLive,
     } = body as {
       SiteName: string;
       Announcement: string;
@@ -48,6 +50,8 @@ export async function POST(request: NextRequest) {
       DoubanImageProxyType: string;
       DoubanImageProxy: string;
       DisableYellowFilter: boolean;
+      FluidSearch: boolean;
+      EnableWebLive: boolean;
     };
 
     // 参数校验
@@ -60,13 +64,13 @@ export async function POST(request: NextRequest) {
       typeof DoubanProxy !== 'string' ||
       typeof DoubanImageProxyType !== 'string' ||
       typeof DoubanImageProxy !== 'string' ||
-      typeof DisableYellowFilter !== 'boolean'
+      typeof DisableYellowFilter !== 'boolean' ||
+      typeof FluidSearch !== 'boolean'
     ) {
       return NextResponse.json({ error: '参数格式错误' }, { status: 400 });
     }
 
     const adminConfig = await getConfig();
-    const storage = getStorage();
 
     // 权限校验
     if (username !== process.env.USERNAME) {
@@ -90,12 +94,12 @@ export async function POST(request: NextRequest) {
       DoubanImageProxyType,
       DoubanImageProxy,
       DisableYellowFilter,
+      FluidSearch,
+      EnableWebLive: EnableWebLive ?? false,
     };
 
     // 写入数据库
-    if (storage && typeof (storage as any).setAdminConfig === 'function') {
-      await (storage as any).setAdminConfig(adminConfig);
-    }
+    await db.saveAdminConfig(adminConfig);
 
     return NextResponse.json(
       { ok: true },

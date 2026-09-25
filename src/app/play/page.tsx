@@ -216,41 +216,43 @@ function PlayPageClient() {
   ): Promise<SearchResult> => {
     if (sources.length === 1) return sources[0];
 
-    // 将播放源均分为两批，并发测速各批，避免一次性过多请求
-    const batchSize = Math.ceil(sources.length / 2);
+    // 固定并发数测速，避免源数量多时同时创建大量 hls 实例拖垮设备
+    const MAX_CONCURRENT_TEST = 4;
     const allResults: Array<{
       source: SearchResult;
       testResult: { quality: string; loadSpeed: string; pingTime: number };
-    } | null> = [];
+    } | null> = new Array(sources.length).fill(null);
 
-    for (let start = 0; start < sources.length; start += batchSize) {
-      const batchSources = sources.slice(start, start + batchSize);
-      const batchResults = await Promise.all(
-        batchSources.map(async (source) => {
-          try {
-            // 检查是否有第一集的播放地址
-            if (!source.episodes || source.episodes.length === 0) {
-              console.warn(`播放源 ${source.source_name} 没有可用的播放地址`);
-              return null;
-            }
+    const testOne = async (index: number) => {
+      const source = sources[index];
+      try {
+        // 检查是否有第一集的播放地址
+        if (!source.episodes || source.episodes.length === 0) {
+          console.warn(`播放源 ${source.source_name} 没有可用的播放地址`);
+          return;
+        }
 
-            const episodeUrl =
-              source.episodes.length > 1
-                ? source.episodes[1]
-                : source.episodes[0];
-            const testResult = await getVideoResolutionFromM3u8(episodeUrl);
+        const episodeUrl =
+          source.episodes.length > 1 ? source.episodes[1] : source.episodes[0];
+        const testResult = await getVideoResolutionFromM3u8(episodeUrl);
 
-            return {
-              source,
-              testResult,
-            };
-          } catch (error) {
-            return null;
-          }
-        })
-      );
-      allResults.push(...batchResults);
-    }
+        allResults[index] = { source, testResult };
+      } catch (error) {
+        allResults[index] = null;
+      }
+    };
+
+    let cursor = 0;
+    const workers = Array.from(
+      { length: Math.min(MAX_CONCURRENT_TEST, sources.length) },
+      async () => {
+        while (cursor < sources.length) {
+          const current = cursor++;
+          await testOne(current);
+        }
+      }
+    );
+    await Promise.all(workers);
 
     // 等待所有测速完成，包含成功和失败的结果
     // 保存所有测速结果到 precomputedVideoInfo，供 EpisodeSelector 使用（包含错误结果）
@@ -328,10 +330,8 @@ function PlayPageClient() {
     console.log('播放源评分排序结果:');
     resultsWithScore.forEach((result, index) => {
       console.log(
-        `${index + 1}. ${
-          result.source.source_name
-        } - 评分: ${result.score.toFixed(2)} (${result.testResult.quality}, ${
-          result.testResult.loadSpeed
+        `${index + 1}. ${result.source.source_name
+        } - 评分: ${result.score.toFixed(2)} (${result.testResult.quality}, ${result.testResult.loadSpeed
         }, ${result.testResult.pingTime}ms)`
       );
     });
@@ -690,13 +690,13 @@ function PlayPageClient() {
         const results = data.results.filter(
           (result: SearchResult) =>
             result.title.replaceAll(' ', '').toLowerCase() ===
-              videoTitleRef.current.replaceAll(' ', '').toLowerCase() &&
+            videoTitleRef.current.replaceAll(' ', '').toLowerCase() &&
             (videoYearRef.current
               ? result.year.toLowerCase() === videoYearRef.current.toLowerCase()
               : true) &&
             (searchType
               ? (searchType === 'tv' && result.episodes.length > 1) ||
-                (searchType === 'movie' && result.episodes.length === 1)
+              (searchType === 'movie' && result.episodes.length === 1)
               : true)
         );
         setAvailableSources(results);
@@ -1266,9 +1266,8 @@ function PlayPageClient() {
     // 非WebKit浏览器且播放器已存在，使用switch方法切换
     if (!isWebkit && artPlayerRef.current) {
       artPlayerRef.current.switch = videoUrl;
-      artPlayerRef.current.title = `${videoTitle} - 第${
-        currentEpisodeIndex + 1
-      }集`;
+      artPlayerRef.current.title = `${videoTitle} - 第${currentEpisodeIndex + 1
+        }集`;
       artPlayerRef.current.poster = videoCover;
       if (artPlayerRef.current?.video) {
         ensureVideoSource(
@@ -1287,7 +1286,8 @@ function PlayPageClient() {
     try {
       // 创建新的播放器实例
       Artplayer.PLAYBACK_RATE = [0.5, 0.75, 1, 1.25, 1.5, 2, 3];
-      Artplayer.USE_RAF = true;
+      Artplayer.USE_RAF = false;
+      Artplayer.FULLSCREEN_WEB_IN_BODY = true;
 
       artPlayerRef.current = new Artplayer({
         container: artRef.current,
@@ -1337,12 +1337,13 @@ function PlayPageClient() {
             const hls = new Hls({
               debug: false, // 关闭日志
               enableWorker: true, // WebWorker 解码，降低主线程压力
-              lowLatencyMode: true, // 开启低延迟 LL-HLS
+              lowLatencyMode: false, // 点播无需低延迟，关闭后缓冲更充足，弱网下不易卡顿
 
               /* 缓冲/内存相关 */
-              maxBufferLength: 30, // 前向缓冲最大 30s，过大容易导致高延迟
+              maxBufferLength: 60, // 前向缓冲最大 60s，出网带宽小的源可提前缓冲，减少卡顿
+              maxMaxBufferLength: 120, // 网络较差时允许缓冲区扩大到 120s
               backBufferLength: 30, // 仅保留 30s 已播放内容，避免内存占用
-              maxBufferSize: 60 * 1000 * 1000, // 约 60MB，超出后触发清理
+              maxBufferSize: 100 * 1000 * 1000, // 约 100MB，超出后触发清理
 
               /* 自定义loader */
               loader: blockAdEnabledRef.current
@@ -1511,10 +1512,6 @@ function PlayPageClient() {
         saveCurrentPlayProgress();
       });
 
-      artPlayerRef.current.on('video:ended', () => {
-        releaseWakeLock();
-      });
-
       // 如果播放器初始化时已经在播放状态，则请求 Wake Lock
       if (artPlayerRef.current && !artPlayerRef.current.paused) {
         requestWakeLock();
@@ -1594,7 +1591,7 @@ function PlayPageClient() {
           skipConfigRef.current.outro_time < 0 &&
           duration > 0 &&
           currentTime >
-            artPlayerRef.current.duration + skipConfigRef.current.outro_time
+          artPlayerRef.current.duration + skipConfigRef.current.outro_time
         ) {
           if (
             currentEpisodeIndexRef.current <
@@ -1617,8 +1614,10 @@ function PlayPageClient() {
         }
       });
 
-      // 监听视频播放结束事件，自动播放下一集
+      // 监听视频播放结束事件：释放 Wake Lock 并自动播放下一集
       artPlayerRef.current.on('video:ended', () => {
+        releaseWakeLock();
+
         const d = detailRef.current;
         const idx = currentEpisodeIndexRef.current;
         if (d && d.episodes && idx < d.episodes.length - 1) {
@@ -1631,9 +1630,6 @@ function PlayPageClient() {
       artPlayerRef.current.on('video:timeupdate', () => {
         const now = Date.now();
         let interval = 5000;
-        if (process.env.NEXT_PUBLIC_STORAGE_TYPE === 'd1') {
-          interval = 10000;
-        }
         if (process.env.NEXT_PUBLIC_STORAGE_TYPE === 'upstash') {
           interval = 20000;
         }
@@ -1641,10 +1637,6 @@ function PlayPageClient() {
           saveCurrentPlayProgress();
           lastSaveTimeRef.current = now;
         }
-      });
-
-      artPlayerRef.current.on('pause', () => {
-        saveCurrentPlayProgress();
       });
 
       if (artPlayerRef.current?.video) {
@@ -1711,30 +1703,27 @@ function PlayPageClient() {
             <div className='mb-6 w-80 mx-auto'>
               <div className='flex justify-center space-x-2 mb-4'>
                 <div
-                  className={`w-3 h-3 rounded-full transition-all duration-500 ${
-                    loadingStage === 'searching' || loadingStage === 'fetching'
-                      ? 'bg-green-500 scale-125'
-                      : loadingStage === 'preferring' ||
-                        loadingStage === 'ready'
+                  className={`w-3 h-3 rounded-full transition-all duration-500 ${loadingStage === 'searching' || loadingStage === 'fetching'
+                    ? 'bg-green-500 scale-125'
+                    : loadingStage === 'preferring' ||
+                      loadingStage === 'ready'
                       ? 'bg-green-500'
                       : 'bg-gray-300'
-                  }`}
+                    }`}
                 ></div>
                 <div
-                  className={`w-3 h-3 rounded-full transition-all duration-500 ${
-                    loadingStage === 'preferring'
-                      ? 'bg-green-500 scale-125'
-                      : loadingStage === 'ready'
+                  className={`w-3 h-3 rounded-full transition-all duration-500 ${loadingStage === 'preferring'
+                    ? 'bg-green-500 scale-125'
+                    : loadingStage === 'ready'
                       ? 'bg-green-500'
                       : 'bg-gray-300'
-                  }`}
+                    }`}
                 ></div>
                 <div
-                  className={`w-3 h-3 rounded-full transition-all duration-500 ${
-                    loadingStage === 'ready'
-                      ? 'bg-green-500 scale-125'
-                      : 'bg-gray-300'
-                  }`}
+                  className={`w-3 h-3 rounded-full transition-all duration-500 ${loadingStage === 'ready'
+                    ? 'bg-green-500 scale-125'
+                    : 'bg-gray-300'
+                    }`}
                 ></div>
               </div>
 
@@ -1745,11 +1734,11 @@ function PlayPageClient() {
                   style={{
                     width:
                       loadingStage === 'searching' ||
-                      loadingStage === 'fetching'
+                        loadingStage === 'fetching'
                         ? '33%'
                         : loadingStage === 'preferring'
-                        ? '66%'
-                        : '100%',
+                          ? '66%'
+                          : '100%',
                   }}
                 ></div>
               </div>
@@ -1844,7 +1833,7 @@ function PlayPageClient() {
             {videoTitle || '影片标题'}
             {totalEpisodes > 1 && (
               <span className='text-gray-500 dark:text-gray-400'>
-                {` > 第 ${currentEpisodeIndex + 1} 集`}
+                {` > ${detail?.episodes_titles?.[currentEpisodeIndex] || `第 ${currentEpisodeIndex + 1} 集`}`}
               </span>
             )}
           </h1>
@@ -1863,9 +1852,8 @@ function PlayPageClient() {
               }
             >
               <svg
-                className={`w-3.5 h-3.5 text-gray-500 dark:text-gray-400 transition-transform duration-200 ${
-                  isEpisodeSelectorCollapsed ? 'rotate-180' : 'rotate-0'
-                }`}
+                className={`w-3.5 h-3.5 text-gray-500 dark:text-gray-400 transition-transform duration-200 ${isEpisodeSelectorCollapsed ? 'rotate-180' : 'rotate-0'
+                  }`}
                 fill='none'
                 stroke='currentColor'
                 viewBox='0 0 24 24'
@@ -1883,27 +1871,24 @@ function PlayPageClient() {
 
               {/* 精致的状态指示点 */}
               <div
-                className={`absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full transition-all duration-200 ${
-                  isEpisodeSelectorCollapsed
-                    ? 'bg-orange-400 animate-pulse'
-                    : 'bg-green-400'
-                }`}
+                className={`absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full transition-all duration-200 ${isEpisodeSelectorCollapsed
+                  ? 'bg-orange-400 animate-pulse'
+                  : 'bg-green-400'
+                  }`}
               ></div>
             </button>
           </div>
 
           <div
-            className={`grid gap-4 lg:h-[500px] xl:h-[650px] 2xl:h-[750px] transition-all duration-300 ease-in-out ${
-              isEpisodeSelectorCollapsed
-                ? 'grid-cols-1'
-                : 'grid-cols-1 md:grid-cols-4'
-            }`}
+            className={`grid gap-4 lg:h-[500px] xl:h-[650px] 2xl:h-[750px] transition-all duration-300 ease-in-out ${isEpisodeSelectorCollapsed
+              ? 'grid-cols-1'
+              : 'grid-cols-1 md:grid-cols-4'
+              }`}
           >
             {/* 播放器 */}
             <div
-              className={`h-full transition-all duration-300 ease-in-out rounded-xl border border-white/0 dark:border-white/30 ${
-                isEpisodeSelectorCollapsed ? 'col-span-1' : 'md:col-span-3'
-              }`}
+              className={`h-full transition-all duration-300 ease-in-out rounded-xl border border-white/0 dark:border-white/30 ${isEpisodeSelectorCollapsed ? 'col-span-1' : 'md:col-span-3'
+                }`}
             >
               <div className='relative w-full h-[300px] lg:h-full'>
                 <div
@@ -1953,11 +1938,10 @@ function PlayPageClient() {
 
             {/* 选集和换源 - 在移动端始终显示，在 lg 及以上可折叠 */}
             <div
-              className={`h-[300px] lg:h-full md:overflow-hidden transition-all duration-300 ease-in-out ${
-                isEpisodeSelectorCollapsed
-                  ? 'md:col-span-1 lg:hidden lg:opacity-0 lg:scale-95'
-                  : 'md:col-span-1 lg:opacity-100 lg:scale-100'
-              }`}
+              className={`h-[300px] lg:h-full md:overflow-hidden transition-all duration-300 ease-in-out ${isEpisodeSelectorCollapsed
+                ? 'md:col-span-1 lg:hidden lg:opacity-0 lg:scale-95'
+                : 'md:col-span-1 lg:opacity-100 lg:scale-100'
+                }`}
             >
               <EpisodeSelector
                 totalEpisodes={totalEpisodes}

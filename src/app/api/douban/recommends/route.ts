@@ -23,7 +23,7 @@ interface DoubanRecommendApiResponse {
   }>;
 }
 
-export const runtime = 'edge';
+export const runtime = 'nodejs';
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
@@ -118,6 +118,7 @@ export async function GET(request: NextRequest) {
         'Cache-Control': `public, max-age=${cacheTime}, s-maxage=${cacheTime}`,
         'CDN-Cache-Control': `public, s-maxage=${cacheTime}`,
         'Vercel-CDN-Cache-Control': `public, s-maxage=${cacheTime}`,
+        'Netlify-Vary': 'query',
       },
     });
   } catch (error) {

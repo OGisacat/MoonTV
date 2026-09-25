@@ -16,7 +16,8 @@ import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 import { changelog, ChangelogEntry } from '@/lib/changelog';
-import { compareVersions, CURRENT_VERSION, UpdateStatus } from '@/lib/version';
+import { CURRENT_VERSION } from '@/lib/version';
+import { compareVersions, UpdateStatus } from '@/lib/version_check';
 
 interface VersionPanelProps {
   isOpen: boolean;
@@ -47,6 +48,28 @@ export const VersionPanel: React.FC<VersionPanelProps> = ({
     return () => setMounted(false);
   }, []);
 
+  // Body 滚动锁定 - 使用 overflow 方式避免布局问题
+  useEffect(() => {
+    if (isOpen) {
+      const body = document.body;
+      const html = document.documentElement;
+
+      // 保存原始样式
+      const originalBodyOverflow = body.style.overflow;
+      const originalHtmlOverflow = html.style.overflow;
+
+      // 只设置 overflow 来阻止滚动
+      body.style.overflow = 'hidden';
+      html.style.overflow = 'hidden';
+
+      return () => {
+        // 恢复所有原始样式
+        body.style.overflow = originalBodyOverflow;
+        html.style.overflow = originalHtmlOverflow;
+      };
+    }
+  }, [isOpen]);
+
   // 获取远程变更日志
   useEffect(() => {
     if (isOpen) {
@@ -58,7 +81,7 @@ export const VersionPanel: React.FC<VersionPanelProps> = ({
   const fetchRemoteChangelog = async () => {
     try {
       const response = await fetch(
-        'https://raw.githubusercontent.com/LunaTechLab/MoonTV/main/CHANGELOG'
+        'https://raw.githubusercontent.com/MoonTechLab/LunaTV/main/CHANGELOG'
       );
       if (response.ok) {
         const content = await response.text();
@@ -87,58 +110,70 @@ export const VersionPanel: React.FC<VersionPanelProps> = ({
 
   // 解析变更日志格式
   const parseChangelog = (content: string): RemoteChangelogEntry[] => {
-    const entries: RemoteChangelogEntry[] = [];
-    const sections = content.split(/(?=^## )/m);
+    const lines = content.split('\n');
+    const versions: RemoteChangelogEntry[] = [];
+    let currentVersion: RemoteChangelogEntry | null = null;
+    let currentSection: string | null = null;
+    let inVersionContent = false;
 
-    sections.forEach((section) => {
-      if (!section.trim()) return;
+    for (const line of lines) {
+      const trimmedLine = line.trim();
 
-      const versionMatch = section.match(/^## \[([^\]]+)\]/);
-      if (!versionMatch) return;
+      // 匹配版本行: ## [X.Y.Z] - YYYY-MM-DD
+      const versionMatch = trimmedLine.match(
+        /^## \[([\d.]+)\] - (\d{4}-\d{2}-\d{2})$/
+      );
+      if (versionMatch) {
+        if (currentVersion) {
+          versions.push(currentVersion);
+        }
 
-      const version = versionMatch[1];
-      const dateMatch = section.match(/\(([^)]+)\)/);
-      const date = dateMatch ? dateMatch[1] : '';
-
-      const added: string[] = [];
-      const changed: string[] = [];
-      const fixed: string[] = [];
-
-      // 解析各个部分
-      const addedMatch = section.match(/### Added\n([\s\S]*?)(?=### |$)/);
-      if (addedMatch) {
-        added.push(
-          ...addedMatch[1]
-            .split('\n')
-            .filter((line) => line.trim().startsWith('-'))
-            .map((line) => line.trim().substring(1).trim())
-        );
+        currentVersion = {
+          version: versionMatch[1],
+          date: versionMatch[2],
+          added: [],
+          changed: [],
+          fixed: [],
+        };
+        currentSection = null;
+        inVersionContent = true;
+        continue;
       }
 
-      const changedMatch = section.match(/### Changed\n([\s\S]*?)(?=### |$)/);
-      if (changedMatch) {
-        changed.push(
-          ...changedMatch[1]
-            .split('\n')
-            .filter((line) => line.trim().startsWith('-'))
-            .map((line) => line.trim().substring(1).trim())
-        );
+      // 如果遇到下一个版本或到达文件末尾，停止处理当前版本
+      if (inVersionContent && currentVersion) {
+        // 匹配章节标题
+        if (trimmedLine === '### Added') {
+          currentSection = 'added';
+          continue;
+        } else if (trimmedLine === '### Changed') {
+          currentSection = 'changed';
+          continue;
+        } else if (trimmedLine === '### Fixed') {
+          currentSection = 'fixed';
+          continue;
+        }
+
+        // 匹配条目: - 内容
+        if (trimmedLine.startsWith('- ') && currentSection) {
+          const entry = trimmedLine.substring(2);
+          if (currentSection === 'added') {
+            currentVersion.added.push(entry);
+          } else if (currentSection === 'changed') {
+            currentVersion.changed.push(entry);
+          } else if (currentSection === 'fixed') {
+            currentVersion.fixed.push(entry);
+          }
+        }
       }
+    }
 
-      const fixedMatch = section.match(/### Fixed\n([\s\S]*?)(?=### |$)/);
-      if (fixedMatch) {
-        fixed.push(
-          ...fixedMatch[1]
-            .split('\n')
-            .filter((line) => line.trim().startsWith('-'))
-            .map((line) => line.trim().substring(1).trim())
-        );
-      }
+    // 添加最后一个版本
+    if (currentVersion) {
+      versions.push(currentVersion);
+    }
 
-      entries.push({ version, date, added, changed, fixed });
-    });
-
-    return entries;
+    return versions;
   };
 
   // 渲染变更日志条目
@@ -152,13 +187,12 @@ export const VersionPanel: React.FC<VersionPanelProps> = ({
     return (
       <div
         key={entry.version}
-        className={`p-4 rounded-lg border ${
-          isCurrentVersion
-            ? 'bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800'
-            : isUpdate
+        className={`p-4 rounded-lg border ${isCurrentVersion
+          ? 'bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800'
+          : isUpdate
             ? 'bg-yellow-50 dark:bg-yellow-900/20 border-yellow-200 dark:border-yellow-800'
             : 'bg-gray-50 dark:bg-gray-800/60 border-gray-200 dark:border-gray-700'
-        }`}
+          }`}
       >
         {/* 版本标题 */}
         <div className='flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3'>
@@ -256,10 +290,30 @@ export const VersionPanel: React.FC<VersionPanelProps> = ({
       <div
         className='fixed inset-0 bg-black/50 backdrop-blur-sm z-[1000]'
         onClick={onClose}
+        onTouchMove={(e) => {
+          // 只阻止滚动，允许其他触摸事件
+          e.preventDefault();
+        }}
+        onWheel={(e) => {
+          // 阻止滚轮滚动
+          e.preventDefault();
+        }}
+        style={{
+          touchAction: 'none',
+        }}
       />
 
       {/* 版本面板 */}
-      <div className='fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-xl max-h-[90vh] bg-white dark:bg-gray-900 rounded-xl shadow-xl z-[1001] overflow-hidden'>
+      <div
+        className='fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-xl max-h-[90vh] bg-white dark:bg-gray-900 rounded-xl shadow-xl z-[1001] overflow-hidden'
+        onTouchMove={(e) => {
+          // 允许版本面板内部滚动，阻止事件冒泡到外层
+          e.stopPropagation();
+        }}
+        style={{
+          touchAction: 'auto', // 允许面板内的正常触摸操作
+        }}
+      >
         {/* 标题栏 */}
         <div className='flex items-center justify-between p-3 sm:p-6 border-b border-gray-200 dark:border-gray-700'>
           <div className='flex items-center gap-2 sm:gap-3'>
@@ -309,7 +363,7 @@ export const VersionPanel: React.FC<VersionPanelProps> = ({
                     </div>
                   </div>
                   <a
-                    href='https://github.com/LunaTechLab/MoonTV'
+                    href='https://github.com/MoonTechLab/LunaTV'
                     target='_blank'
                     rel='noopener noreferrer'
                     className='inline-flex items-center justify-center gap-2 px-3 py-2 bg-yellow-600 hover:bg-yellow-700 text-white text-xs sm:text-sm rounded-lg transition-colors shadow-sm w-full'
@@ -339,7 +393,7 @@ export const VersionPanel: React.FC<VersionPanelProps> = ({
                     </div>
                   </div>
                   <a
-                    href='https://github.com/LunaTechLab/MoonTV'
+                    href='https://github.com/MoonTechLab/LunaTV'
                     target='_blank'
                     rel='noopener noreferrer'
                     className='inline-flex items-center justify-center gap-2 px-3 py-2 bg-green-600 hover:bg-green-700 text-white text-xs sm:text-sm rounded-lg transition-colors shadow-sm w-full'
@@ -390,11 +444,10 @@ export const VersionPanel: React.FC<VersionPanelProps> = ({
                       .map((entry, index) => (
                         <div
                           key={index}
-                          className={`p-4 rounded-lg border ${
-                            entry.version === latestVersion
-                              ? 'bg-yellow-50 dark:bg-yellow-900/20 border-yellow-200 dark:border-yellow-800'
-                              : 'bg-gray-50 dark:bg-gray-800/60 border-gray-200 dark:border-gray-700'
-                          }`}
+                          className={`p-4 rounded-lg border ${entry.version === latestVersion
+                            ? 'bg-yellow-50 dark:bg-yellow-900/20 border-yellow-200 dark:border-yellow-800'
+                            : 'bg-gray-50 dark:bg-gray-800/60 border-gray-200 dark:border-gray-700'
+                            }`}
                         >
                           <div className='flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3'>
                             <div className='flex flex-wrap items-center gap-2'>

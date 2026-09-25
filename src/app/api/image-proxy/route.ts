@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 
-export const runtime = 'edge';
+import { checkImageProxyTarget, isImageContentType } from '@/lib/proxy-guard';
+
+export const runtime = 'nodejs';
 
 // OrionTV 兼容接口
 export async function GET(request: Request) {
@@ -9,6 +11,12 @@ export async function GET(request: Request) {
 
   if (!imageUrl) {
     return NextResponse.json({ error: 'Missing image URL' }, { status: 400 });
+  }
+
+  // 只允许代理公网 http(s) 图片，避免被用来探测内网服务
+  const invalidReason = checkImageProxyTarget(imageUrl);
+  if (invalidReason) {
+    return NextResponse.json({ error: invalidReason }, { status: 400 });
   }
 
   try {
@@ -29,6 +37,15 @@ export async function GET(request: Request) {
 
     const contentType = imageResponse.headers.get('content-type');
 
+    // 只转发真正的图片，避免上游返回 HTML 时在本站域名下被当作页面执行
+    if (!isImageContentType(contentType)) {
+      imageResponse.body?.cancel();
+      return NextResponse.json(
+        { error: 'Upstream response is not an image' },
+        { status: 415 }
+      );
+    }
+
     if (!imageResponse.body) {
       return NextResponse.json(
         { error: 'Image response has no body' },
@@ -41,11 +58,13 @@ export async function GET(request: Request) {
     if (contentType) {
       headers.set('Content-Type', contentType);
     }
+    headers.set('X-Content-Type-Options', 'nosniff');
 
     // 设置缓存头（可选）
     headers.set('Cache-Control', 'public, max-age=15720000, s-maxage=15720000'); // 缓存半年
     headers.set('CDN-Cache-Control', 'public, s-maxage=15720000');
     headers.set('Vercel-CDN-Cache-Control', 'public, s-maxage=15720000');
+    headers.set('Netlify-Vary', 'query');
 
     // 直接返回图片流
     return new Response(imageResponse.body, {

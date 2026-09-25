@@ -13,7 +13,7 @@ interface DoubanApiResponse {
   }>;
 }
 
-export const runtime = 'edge';
+export const runtime = 'nodejs';
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -84,6 +84,7 @@ export async function GET(request: Request) {
         'Cache-Control': `public, max-age=${cacheTime}, s-maxage=${cacheTime}`,
         'CDN-Cache-Control': `public, s-maxage=${cacheTime}`,
         'Vercel-CDN-Cache-Control': `public, s-maxage=${cacheTime}`,
+        'Netlify-Vary': 'query',
       },
     });
   } catch (error) {
@@ -159,6 +160,7 @@ function handleTop250(pageStart: number) {
           'Cache-Control': `public, max-age=${cacheTime}, s-maxage=${cacheTime}`,
           'CDN-Cache-Control': `public, s-maxage=${cacheTime}`,
           'Vercel-CDN-Cache-Control': `public, s-maxage=${cacheTime}`,
+          'Netlify-Vary': 'query',
         },
       });
     })
