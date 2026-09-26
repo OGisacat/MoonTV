@@ -43,6 +43,17 @@ interface WakeLockSentinel {
   removeEventListener(type: 'release', listener: () => void): void;
 }
 
+function isIOSMobileDevice(): boolean {
+  if (typeof navigator === 'undefined') return false;
+
+  // iPadOS may identify itself as MacIntel; touch support distinguishes it
+  // from a desktop Mac. iPhone/iPod are covered by the user agent check.
+  return (
+    /iPhone|iPad|iPod/i.test(navigator.userAgent) ||
+    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
+  );
+}
+
 function PlayPageClient() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -1270,6 +1281,12 @@ function PlayPageClient() {
       Artplayer.USE_RAF = false;
       Artplayer.FULLSCREEN_WEB_IN_BODY = true;
 
+      // iOS native video fullscreen follows the device orientation lock, which
+      // can leave landscape video in a narrow portrait fullscreen. Keep iOS in
+      // ArtPlayer's web fullscreen instead: autoOrientation can rotate the
+      // player itself without relying on the system orientation lock.
+      const useWebFullscreenOnly = isIOSMobileDevice();
+
       artPlayerRef.current = new Artplayer({
         container: artRef.current,
         url: videoUrl,
@@ -1287,7 +1304,7 @@ function PlayPageClient() {
         flip: false,
         playbackRate: true,
         aspectRatio: false,
-        fullscreen: true,
+        fullscreen: !useWebFullscreenOnly,
         fullscreenWeb: true,
         subtitleOffset: false,
         miniProgressBar: false,
