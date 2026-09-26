@@ -30,8 +30,8 @@ importers:
         specifier: ^1.25.0
         version: 1.35.1
       artplayer:
-        specifier: ^5.2.5
-        version: 5.2.5
+        specifier: ^5.4.0
+        version: 5.4.0
       bs58:
         specifier: ^6.0.0
         version: 6.0.0
@@ -1883,8 +1883,8 @@ packages:
     resolution: {integrity: sha512-3duEwti880xqi4eAMN8AyR4a0ByT90zoYdLlevfrvU43vb0YZwZVfxOgxWrLXXXpyugL0hNZc9G6BiB5B3nUug==}
     engines: {node: '>=8'}
 
-  artplayer@5.2.5:
-    resolution: {integrity: sha512-Ogym5rvkAJ4VLncM4Apl3TJ/a/ozM3csvY4IKuuMR++hUmEZgj/HaGsNonwx8r56nsqiZYE7O4vS1HFZl+NBSg==}
+  artplayer@5.4.0:
+    resolution: {integrity: sha512-2B+plbx8N2yNsjK4nJU3+EOG8TULm1LRZk/QPkWRAMEX2Ee/MSnZG/WJYz8kcoZxZuLKcQ3uXifqLuPxZOH29A==}
 
   assert@2.0.0:
     resolution: {integrity: sha512-se5Cd+js9dXJnu6Ag2JFc00t+HmHOen+8Q+L7O9zI0PqQXr20uk2J0XQqMxZEeo5U50o8Nvmmx7dZrl+Ufr35A==}
@@ -7214,7 +7214,7 @@ snapshots:
 
   arrify@2.0.1: {}
 
-  artplayer@5.2.5:
+  artplayer@5.4.0:
     dependencies:
       option-validator: 2.0.6
 
