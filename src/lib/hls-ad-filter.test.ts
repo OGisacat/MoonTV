@@ -55,6 +55,19 @@ describe('filterAdsFromM3U8', () => {
     expect(output).not.toContain('ad-001.ts');
   });
 
+  it('strips SCTE metadata without dropping following content', () => {
+    const input = [
+      '#EXTM3U',
+      '#EXT-OATCLS-SCTE35:/DAvAAAAAAAA///wFAVIAAACf+/+',
+      '#EXTINF:10,',
+      'main.ts',
+    ].join('\n');
+
+    const output = filterAdsFromM3U8(input);
+    expect(output).not.toContain('SCTE35');
+    expect(output).toContain('main.ts');
+  });
+
   it('removes HLS interstitial metadata without deleting normal media', () => {
     const input = [
       '#EXTM3U',
