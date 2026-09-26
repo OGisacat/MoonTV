@@ -80,4 +80,68 @@ describe('filterAdsFromM3U8', () => {
     expect(output).not.toContain('interstitial');
     expect(output).toContain('main.ts');
   });
+
+  it('removes a known iKun METHOD=NONE interstitial block', () => {
+    const input = [
+      '#EXTM3U',
+      '#EXTINF:8,',
+      'content-1.ts',
+      '#EXT-X-DISCONTINUITY',
+      '#EXT-X-KEY:METHOD=NONE',
+      '#EXTINF:5,',
+      'promo-a.ts',
+      '#EXTINF:5,',
+      'promo-b.ts',
+      '#EXT-X-DISCONTINUITY',
+      '#EXT-X-KEY:METHOD=AES-128,URI="key.bin"',
+      '#EXTINF:8,',
+      'content-2.ts',
+    ].join('\n');
+
+    const output = filterAdsFromM3U8(
+      input,
+      'https://v1.bfikuncdn.com/path/index.m3u8'
+    );
+
+    expect(output).toContain('content-1.ts');
+    expect(output).toContain('content-2.ts');
+    expect(output).not.toContain('promo-a.ts');
+    expect(output).not.toContain('promo-b.ts');
+  });
+
+  it('does not apply the iKun structural rule to unrelated hosts', () => {
+    const input = [
+      '#EXTM3U',
+      '#EXT-X-DISCONTINUITY',
+      '#EXT-X-KEY:METHOD=NONE',
+      '#EXTINF:5,',
+      'segment.ts',
+      '#EXT-X-DISCONTINUITY',
+    ].join('\n');
+
+    const output = filterAdsFromM3U8(
+      input,
+      'https://video.example.com/index.m3u8'
+    );
+
+    expect(output).toContain('segment.ts');
+  });
+
+  it('removes explicit adjump segments', () => {
+    const input = [
+      '#EXTM3U',
+      '#EXTINF:5,',
+      'content-1.ts',
+      '#EXTINF:5,',
+      'https://cdn.example.com/path/adjump-001.ts',
+      '#EXTINF:5,',
+      'content-2.ts',
+    ].join('\n');
+
+    const output = filterAdsFromM3U8(input);
+    expect(output).toContain('content-1.ts');
+    expect(output).toContain('content-2.ts');
+    expect(output).not.toContain('adjump-001.ts');
+  });
+
 });
