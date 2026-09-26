@@ -205,3 +205,37 @@ div[data-media-provider] video {
 }
 
 
+
+
+/* iOS manual landscape mode.
+   Position and size are injected from VisualViewport so the rotated player
+   stays centered inside the actually visible area instead of assuming 100dvh. */
+html.ios-manual-landscape-page,
+body.ios-manual-landscape-page {
+  overflow: hidden !important;
+  overscroll-behavior: none !important;
+  background: #000 !important;
+}
+
+body.ios-manual-landscape-page::before {
+  content: '';
+  position: fixed;
+  inset: 0 0 auto 0;
+  height: max(env(safe-area-inset-top), 24px);
+  background: #000;
+  z-index: 2147483646;
+  pointer-events: none;
+}
+
+.ios-manual-landscape-player {
+  position: fixed !important;
+  max-width: none !important;
+  max-height: none !important;
+  margin: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: #000 !important;
+  transform: translate(-50%, -50%) rotate(90deg) !important;
+  transform-origin: center center !important;
+  z-index: 2147483647 !important;
+}

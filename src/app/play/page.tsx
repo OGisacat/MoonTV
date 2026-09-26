@@ -214,6 +214,8 @@ function PlayPageClient() {
 
   const artPlayerRef = useRef<any>(null);
   const artRef = useRef<HTMLDivElement | null>(null);
+  const manualLandscapeCleanupRef = useRef<(() => void) | null>(null);
+  const manualLandscapeHideTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   // Wake Lock 相关
   const wakeLockRef = useRef<WakeLockSentinel | null>(null);
@@ -486,8 +488,120 @@ function PlayPageClient() {
     }
   };
 
+  const setIOSManualLandscape = (enabled: boolean) => {
+    if (typeof window === 'undefined' || typeof document === 'undefined') {
+      return;
+    }
+
+    const player = artRef.current;
+    if (!player) return;
+
+    // Remove listeners/timers from the previous manual-landscape session.
+    manualLandscapeCleanupRef.current?.();
+    manualLandscapeCleanupRef.current = null;
+    if (manualLandscapeHideTimerRef.current) {
+      clearTimeout(manualLandscapeHideTimerRef.current);
+      manualLandscapeHideTimerRef.current = null;
+    }
+
+    const html = document.documentElement;
+    const body = document.body;
+    const themeSelector = 'meta[data-ios-manual-landscape-theme-color]';
+
+    if (!enabled) {
+      player.classList.remove('ios-manual-landscape-player');
+      html.classList.remove('ios-manual-landscape-page');
+      body.classList.remove('ios-manual-landscape-page');
+
+      for (const property of ['top', 'left', 'width', 'height']) {
+        player.style.removeProperty(property);
+      }
+      document.querySelector(themeSelector)?.remove();
+
+      requestAnimationFrame(() => {
+        try {
+          artPlayerRef.current?.emit('resize');
+        } catch {
+          // ignore
+        }
+      });
+      return;
+    }
+
+    player.classList.add('ios-manual-landscape-player');
+    html.classList.add('ios-manual-landscape-page');
+    body.classList.add('ios-manual-landscape-page');
+
+    // Keep Safari/PWA chrome black while the custom landscape view is active.
+    let themeMeta = document.querySelector(
+      themeSelector
+    ) as HTMLMetaElement | null;
+    if (!themeMeta) {
+      themeMeta = document.createElement('meta');
+      themeMeta.name = 'theme-color';
+      themeMeta.dataset.iosManualLandscapeThemeColor = 'true';
+      document.head.appendChild(themeMeta);
+    }
+    themeMeta.content = '#000000';
+
+    // Use VisualViewport rather than 100dvh/100dvw. On iPhone this accounts
+    // for the actually visible area (status bar / browser UI) and keeps the
+    // rotated player centered instead of drifting toward one side.
+    const updateLayout = () => {
+      const viewport = window.visualViewport;
+      const visibleWidth = viewport?.width ?? window.innerWidth;
+      const visibleHeight = viewport?.height ?? window.innerHeight;
+      const offsetLeft = viewport?.offsetLeft ?? 0;
+      const offsetTop = viewport?.offsetTop ?? 0;
+
+      player.style.left = `${offsetLeft + visibleWidth / 2}px`;
+      player.style.top = `${offsetTop + visibleHeight / 2}px`;
+      player.style.width = `${visibleHeight}px`;
+      player.style.height = `${visibleWidth}px`;
+
+      try {
+        artPlayerRef.current?.emit('resize');
+      } catch {
+        // ignore
+      }
+    };
+
+    updateLayout();
+
+    const visualViewport = window.visualViewport;
+    visualViewport?.addEventListener('resize', updateLayout);
+    visualViewport?.addEventListener('scroll', updateLayout);
+    window.addEventListener('resize', updateLayout);
+
+    manualLandscapeCleanupRef.current = () => {
+      visualViewport?.removeEventListener('resize', updateLayout);
+      visualViewport?.removeEventListener('scroll', updateLayout);
+      window.removeEventListener('resize', updateLayout);
+    };
+
+    // The button tap makes ArtPlayer controls visible. Force them to auto-hide
+    // shortly after entering manual landscape so progress/time controls do not
+    // remain stuck on screen.
+    manualLandscapeHideTimerRef.current = setTimeout(() => {
+      try {
+        if (
+          artRef.current?.classList.contains(
+            'ios-manual-landscape-player'
+          ) &&
+          artPlayerRef.current &&
+          !artPlayerRef.current.paused
+        ) {
+          artPlayerRef.current.controls.show = false;
+        }
+      } catch {
+        // ignore
+      }
+    }, 1400);
+  };
+
   // 清理播放器资源的统一函数
   const cleanupPlayer = () => {
+    setIOSManualLandscape(false);
     if (artPlayerRef.current) {
       try {
         // 销毁 HLS 实例
@@ -1393,6 +1507,7 @@ function PlayPageClient() {
                   ) {
                     artPlayerRef.current.video.hls.destroy();
                   }
+                  setIOSManualLandscape(false);
                   artPlayerRef.current.destroy();
                   artPlayerRef.current = null;
                 }
@@ -1483,6 +1598,25 @@ function PlayPageClient() {
               handleNextEpisode();
             },
           },
+          ...(isIOSMobile
+            ? [
+                {
+                  name: 'ios-manual-landscape',
+                  position: 'right' as const,
+                  index: 65,
+                  html: '<i class="art-icon flex"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M4 8V4h4M20 16v4h-4M5.5 18.5A8 8 0 0 1 18.5 5.5M18.5 5.5H14.5M18.5 5.5V9.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></i>',
+                  tooltip: '手动横屏',
+                  click: function () {
+                    const enabled =
+                      !artRef.current?.classList.contains(
+                        'ios-manual-landscape-player'
+                      );
+                    setIOSManualLandscape(enabled);
+                    return enabled ? '退出横屏' : '手动横屏';
+                  },
+                },
+              ]
+            : []),
         ],
       });
 
