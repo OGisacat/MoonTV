@@ -127,6 +127,6 @@ export function decorateSourceName(key: string, name: string): string {
   if (!label) return name;
 
   // Idempotent: remove an older ad badge first, then append the current label.
-  const baseName = name.replace(/\s*[🟢🟡🔴].*$/, '').trim();
+  const baseName = name.replace(/\s*[🟢🟡🔴].*$/u, '').trim();
   return `${baseName} ${label}`;
 }
