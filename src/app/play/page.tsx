@@ -486,52 +486,8 @@ function PlayPageClient() {
     }
   };
 
-  const setIOSManualLandscape = (enabled: boolean) => {
-    if (typeof document === 'undefined') return;
-
-    artRef.current?.classList.toggle('ios-manual-landscape-player', enabled);
-    document.documentElement.classList.toggle(
-      'ios-manual-landscape-page',
-      enabled
-    );
-    document.body.classList.toggle('ios-manual-landscape-page', enabled);
-
-    // iOS Safari / Home Screen PWA can keep the status-bar area white even
-    // when the document itself is black. Add a temporary unscoped theme-color
-    // while manual landscape is active so that system chrome follows the
-    // player. Removing it restores the normal light/dark media theme colors.
-    const landscapeThemeSelector =
-      'meta[data-ios-manual-landscape-theme-color]';
-    const existingLandscapeTheme = document.querySelector(
-      landscapeThemeSelector
-    );
-
-    if (enabled) {
-      const meta =
-        existingLandscapeTheme || document.createElement('meta');
-      meta.setAttribute('name', 'theme-color');
-      meta.setAttribute('content', '#000000');
-      meta.setAttribute('data-ios-manual-landscape-theme-color', 'true');
-      if (!existingLandscapeTheme) {
-        document.head.appendChild(meta);
-      }
-    } else {
-      existingLandscapeTheme?.remove();
-    }
-
-    // Recalculate ArtPlayer layout after the CSS transform has been applied.
-    requestAnimationFrame(() => {
-      try {
-        artPlayerRef.current?.emit('resize');
-      } catch {
-        // ignore
-      }
-    });
-  };
-
   // 清理播放器资源的统一函数
   const cleanupPlayer = () => {
-    setIOSManualLandscape(false);
     if (artPlayerRef.current) {
       try {
         // 销毁 HLS 实例
@@ -1356,7 +1312,7 @@ function PlayPageClient() {
         lang: 'zh-cn',
         hotkey: false,
         fastForward: true,
-        autoOrientation: !isIOSMobile,
+        autoOrientation: true,
         lock: true,
         moreVideoAttr: {
           crossOrigin: 'anonymous',
@@ -1437,7 +1393,6 @@ function PlayPageClient() {
                   ) {
                     artPlayerRef.current.video.hls.destroy();
                   }
-                  setIOSManualLandscape(false);
                   artPlayerRef.current.destroy();
                   artPlayerRef.current = null;
                 }
@@ -1528,25 +1483,6 @@ function PlayPageClient() {
               handleNextEpisode();
             },
           },
-          ...(isIOSMobile
-            ? [
-                {
-                  name: 'ios-manual-landscape',
-                  position: 'right' as const,
-                  index: 65,
-                  html: '<i class="art-icon flex"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M4 8V4h4M20 16v4h-4M5.5 18.5A8 8 0 0 1 18.5 5.5M18.5 5.5H14.5M18.5 5.5V9.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></i>',
-                  tooltip: '手动横屏',
-                  click: function () {
-                    const enabled =
-                      !artRef.current?.classList.contains(
-                        'ios-manual-landscape-player'
-                      );
-                    setIOSManualLandscape(enabled);
-                    return enabled ? '退出横屏' : '手动横屏';
-                  },
-                },
-              ]
-            : []),
         ],
       });
 

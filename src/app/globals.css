@@ -205,30 +205,3 @@ div[data-media-provider] video {
 }
 
 
-/* iOS manual landscape mode: keep the original native fullscreen button,
-   while providing a separate rotation control for devices with rotation lock. */
-html.ios-manual-landscape-page,
-body.ios-manual-landscape-page {
-  overflow: hidden !important;
-  overscroll-behavior: none !important;
-  background: #000 !important;
-}
-
-.ios-manual-landscape-player {
-  position: fixed !important;
-  top: 50% !important;
-  left: 50% !important;
-  width: 100vh !important;
-  width: 100dvh !important;
-  height: 100vw !important;
-  height: 100dvw !important;
-  max-width: none !important;
-  max-height: none !important;
-  margin: 0 !important;
-  border: 0 !important;
-  border-radius: 0 !important;
-  background: #000 !important;
-  transform: translate(-50%, -50%) rotate(90deg) !important;
-  transform-origin: center center !important;
-  z-index: 2147483647 !important;
-}
