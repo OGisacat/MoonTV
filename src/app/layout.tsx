@@ -27,6 +27,11 @@ export async function generateMetadata(): Promise<Metadata> {
     title: siteName,
     description: '影视聚合',
     manifest: '/manifest.json',
+    appleWebApp: {
+      capable: true,
+      title: siteName,
+      statusBarStyle: 'black-translucent',
+    },
   };
 }
 
