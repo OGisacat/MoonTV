@@ -21,6 +21,9 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
       - name: Sync MoonTechLab/LunaTV and preserve branding
         shell: bash
         run: |
@@ -48,6 +51,14 @@ jobs:
 
           # Keep Docker builds deterministic while still taking upstream Dockerfile changes.
           sed -i 's/corepack prepare pnpm@latest --activate/corepack prepare pnpm@10.14.0 --activate/g' Dockerfile
+
+          # Upstream is still on an insecure Next 14 line. Maintain a patched
+          # Next 15 floor only while upstream itself is below Next 15.
+          upstream_next_major="$(node -p "((require('./package.json').dependencies.next || '').match(/[0-9]+/) || ['0'])[0]")"
+          if [ "$upstream_next_major" -lt 15 ]; then
+            pnpm add --lockfile-only 'next@^15.5.26'
+            pnpm add --lockfile-only --save-dev 'eslint-config-next@^15.5.26'
+          fi
 
           mkdir -p public/icons .github/workflows .github/patches
           cp "$preserve_dir/public/favicon.ico" public/favicon.ico
