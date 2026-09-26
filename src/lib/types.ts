@@ -23,6 +23,7 @@ export interface Favorite {
   cover: string;
   save_time: number; // 记录保存时间（时间戳）
   search_title: string; // 搜索时使用的标题
+  origin?: 'vod' | 'live';
 }
 
 // 存储接口
@@ -36,12 +37,14 @@ export interface IStorage {
   ): Promise<void>;
   getAllPlayRecords(userName: string): Promise<{ [key: string]: PlayRecord }>;
   deletePlayRecord(userName: string, key: string): Promise<void>;
+  deleteAllPlayRecords(userName: string): Promise<void>;
 
   // 收藏相关
   getFavorite(userName: string, key: string): Promise<Favorite | null>;
   setFavorite(userName: string, key: string, favorite: Favorite): Promise<void>;
   getAllFavorites(userName: string): Promise<{ [key: string]: Favorite }>;
   deleteFavorite(userName: string, key: string): Promise<void>;
+  deleteAllFavorites(userName: string): Promise<void>;
 
   // 用户相关
   registerUser(userName: string, password: string): Promise<void>;
@@ -79,6 +82,15 @@ export interface IStorage {
   ): Promise<void>;
   deleteSkipConfig(userName: string, source: string, id: string): Promise<void>;
   getAllSkipConfigs(userName: string): Promise<{ [key: string]: SkipConfig }>;
+
+  // 数据迁移（旧扁平 key → Hash 结构）
+  migrateData?(): Promise<void>;
+
+  // 密码迁移（明文 → 加盐哈希）
+  migratePasswords?(): Promise<void>;
+
+  // 数据清理相关
+  clearAllData(): Promise<void>;
 }
 
 // 搜索结果数据结构
