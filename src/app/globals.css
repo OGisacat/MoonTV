@@ -217,6 +217,16 @@ body.ios-manual-landscape-page {
   background: #000 !important;
 }
 
+body.ios-manual-landscape-page::before {
+  content: '';
+  position: fixed;
+  inset: 0 0 auto 0;
+  height: max(env(safe-area-inset-top), 24px);
+  background: #000;
+  z-index: 2147483646;
+  pointer-events: none;
+}
+
 .ios-manual-landscape-player {
   position: fixed !important;
   max-width: none !important;
