@@ -496,6 +496,29 @@ function PlayPageClient() {
     );
     document.body.classList.toggle('ios-manual-landscape-page', enabled);
 
+    // iOS Safari / Home Screen PWA can keep the status-bar area white even
+    // when the document itself is black. Add a temporary unscoped theme-color
+    // while manual landscape is active so that system chrome follows the
+    // player. Removing it restores the normal light/dark media theme colors.
+    const landscapeThemeSelector =
+      'meta[data-ios-manual-landscape-theme-color]';
+    const existingLandscapeTheme = document.querySelector(
+      landscapeThemeSelector
+    );
+
+    if (enabled) {
+      const meta =
+        existingLandscapeTheme || document.createElement('meta');
+      meta.setAttribute('name', 'theme-color');
+      meta.setAttribute('content', '#000000');
+      meta.setAttribute('data-ios-manual-landscape-theme-color', 'true');
+      if (!existingLandscapeTheme) {
+        document.head.appendChild(meta);
+      }
+    } else {
+      existingLandscapeTheme?.remove();
+    }
+
     // Recalculate ArtPlayer layout after the CSS transform has been applied.
     requestAnimationFrame(() => {
       try {

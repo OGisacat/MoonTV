@@ -27,11 +27,27 @@ export async function generateMetadata(): Promise<Metadata> {
     title: siteName,
     description: '影视聚合',
     manifest: '/manifest.json',
+    appleWebApp: {
+      capable: true,
+      title: siteName,
+      statusBarStyle: 'black-translucent',
+    },
   };
 }
 
 export const viewport: Viewport = {
   viewportFit: 'cover',
+  colorScheme: 'light dark',
+  themeColor: [
+    {
+      media: '(prefers-color-scheme: light)',
+      color: '#f9fbfe',
+    },
+    {
+      media: '(prefers-color-scheme: dark)',
+      color: '#0c111c',
+    },
+  ],
 };
 
 export default async function RootLayout({
