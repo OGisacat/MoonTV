@@ -97,3 +97,36 @@ export const SOURCE_AD_LEGEND = {
   yellow: '🟡 插播情况未知或公开资料有冲突',
   red: '🔴 已有公开资料标记存在片头/片中/片尾插播',
 } as const;
+
+
+export const SOURCE_AD_LABELS: Record<string, string> = {
+  dyttzy: '🔴有插播',
+  heimuer: '🟢无插播',
+  ruyi: '🟢未见插播',
+  bfzy: '🔴有插播',
+  tyyszy: '🟢仅水印',
+  ffzy: '🟡广告有争议',
+  zy360: '🟢仅水印',
+  maotaizy: '🟢仅水印',
+  wolong: '🟢仅水印',
+  jisu: '🟢仅水印',
+  dbzy: '🟢仅水印',
+  mozhua: '🟡插播未知',
+  mdzy: '🟢仅水印',
+  zuid: '🟢未见插播',
+  yinghua: '🔴有插播',
+  wujin: '🔴有插播',
+  wwzy: '🟢仅水印',
+  ikun: '🟢仅水印',
+  lzi: '🔴有插播',
+  xiaomaomi: '🟡插播未知',
+};
+
+export function decorateSourceName(key: string, name: string): string {
+  const label = SOURCE_AD_LABELS[key];
+  if (!label) return name;
+
+  // Idempotent: remove an older ad badge first, then append the current label.
+  const baseName = name.replace(/\s*[🟢🟡🔴].*$/u, '').trim();
+  return `${baseName} ${label}`;
+}
