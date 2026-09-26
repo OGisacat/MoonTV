@@ -4,10 +4,10 @@ const AD_URI_PATTERN =
 const INTERSTITIAL_DATERANGE_PATTERN =
   /^#EXT-X-DATERANGE:.*(?:CLASS="?(?:com\.apple\.hls\.interstitial|ads?|advert(?:isement|ising)?|commercial)|X-ASSET-(?:URI|LIST)=|SCTE35-OUT=)/i;
 
-const CUE_OUT_PATTERN =
-  /^#(?:EXT-X-CUE-OUT(?:-CONT)?|EXT-OATCLS-SCTE35|EXT-X-SCTE35|EXT-X-SPLICEPOINT-SCTE35)/i;
-
+const CUE_OUT_PATTERN = /^#EXT-X-CUE-OUT(?:-CONT)?/i;
 const CUE_IN_PATTERN = /^#EXT-X-CUE-IN/i;
+const AD_METADATA_PATTERN =
+  /^#(?:EXT-OATCLS-SCTE35|EXT-X-SCTE35|EXT-X-SPLICEPOINT-SCTE35)/i;
 
 const SEGMENT_LOCAL_TAG_PATTERN =
   /^#(?:EXTINF:|EXT-X-BYTERANGE:|EXT-X-PROGRAM-DATE-TIME:|EXT-X-GAP\b|EXT-X-DISCONTINUITY\b)/i;
@@ -66,9 +66,13 @@ export function filterAdsFromM3U8(
       continue;
     }
 
-    // HLS interstitials are external ad assets. Removing the metadata prevents
-    // capable players from scheduling them without touching normal segments.
-    if (INTERSTITIAL_DATERANGE_PATTERN.test(line)) {
+    // HLS interstitials are external ad assets. SCTE-35 lines are metadata
+    // signals; strip them, but do not assume they delimit a removable segment
+    // range unless an explicit CUE-OUT/CUE-IN pair is also present.
+    if (
+      INTERSTITIAL_DATERANGE_PATTERN.test(line) ||
+      AD_METADATA_PATTERN.test(line)
+    ) {
       continue;
     }
 
