@@ -39,6 +39,8 @@ jobs:
           cp public/icons/icon-384x384.png "$preserve_dir/public/icons/icon-384x384.png"
           cp public/icons/icon-512x512.png "$preserve_dir/public/icons/icon-512x512.png"
           cp .github/workflows/upstream-sync.yml "$preserve_dir/.github/workflows/upstream-sync.yml"
+          cp .github/workflows/ci.yml "$preserve_dir/.github/workflows/ci.yml"
+          cp .github/workflows/docker-image.yml "$preserve_dir/.github/workflows/docker-image.yml"
 
           git rm -r --ignore-unmatch .
           git checkout upstream/main -- .
@@ -51,6 +53,8 @@ jobs:
           cp "$preserve_dir/public/icons/icon-384x384.png" public/icons/icon-384x384.png
           cp "$preserve_dir/public/icons/icon-512x512.png" public/icons/icon-512x512.png
           cp "$preserve_dir/.github/workflows/upstream-sync.yml" .github/workflows/upstream-sync.yml
+          cp "$preserve_dir/.github/workflows/ci.yml" .github/workflows/ci.yml
+          cp "$preserve_dir/.github/workflows/docker-image.yml" .github/workflows/docker-image.yml
 
           git add -A
           if git diff --cached --quiet; then
