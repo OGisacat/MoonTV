@@ -1,5 +1,5 @@
 const AD_URI_PATTERN =
-  /(?:^|[/?&._=-])(?:ads?|advert(?:isement|ising)?|commercial|preroll|midroll|postroll|promo|vast|ima)(?:[/?&._=-]|$)/i;
+  /(?:^|[/?&._=-])(?:ads?|adjump|advert(?:isement|ising)?|commercial|preroll|midroll|postroll|promo|vast|ima)(?:[/?&._=-]|$)/i;
 
 const INTERSTITIAL_DATERANGE_PATTERN =
   /^#EXT-X-DATERANGE:.*(?:CLASS="?(?:com\.apple\.hls\.interstitial|ads?|advert(?:isement|ising)?|commercial)|X-ASSET-(?:URI|LIST)=|SCTE35-OUT=)/i;
@@ -11,6 +11,46 @@ const AD_METADATA_PATTERN =
 
 const SEGMENT_LOCAL_TAG_PATTERN =
   /^#(?:EXTINF:|EXT-X-BYTERANGE:|EXT-X-PROGRAM-DATE-TIME:|EXT-X-GAP\b|EXT-X-DISCONTINUITY\b)/i;
+
+
+const IKUN_AD_BLOCK_PATTERN =
+  /#EXT-X-DISCONTINUITY\r?\n#EXT-X-KEY:METHOD=NONE[^\r\n]*\r?\n#EXTINF:[^\r\n]*\r?\n[\s\S]*?#EXT-X-DISCONTINUITY/g;
+
+const QIHU_AD_BLOCK_PATTERN =
+  /#EXT-X-DISCONTINUITY\r?\n#EXT-X-KEY:METHOD=NONE[^\r\n]*\r?\n#EXTINF:2(?:\.0+)?[^\r\n]*\r?\n[\s\S]*?#EXT-X-DISCONTINUITY(?:\r?\n#EXT-X-KEY:METHOD=AES-128[^\r\n]*)?/g;
+
+function applyKnownSourceAdRules(
+  m3u8Content: string,
+  manifestUrl?: string
+): string {
+  if (!manifestUrl) return m3u8Content;
+
+  let hostname = '';
+  try {
+    hostname = new URL(manifestUrl).hostname.toLowerCase();
+  } catch {
+    return m3u8Content;
+  }
+
+  // iKun commonly inserts an unencrypted METHOD=NONE block between
+  // discontinuities on bfikuncdn hosts.
+  if (hostname.includes('bfikuncdn')) {
+    return m3u8Content.replace(
+      IKUN_AD_BLOCK_PATTERN,
+      '#EXT-X-DISCONTINUITY'
+    );
+  }
+
+  // 360/qihu variants use a very similar 2-second METHOD=NONE ad block.
+  if (hostname.includes('qihubf')) {
+    return m3u8Content.replace(
+      QIHU_AD_BLOCK_PATTERN,
+      '#EXT-X-DISCONTINUITY'
+    );
+  }
+
+  return m3u8Content;
+}
 
 function isLikelyAdUri(uri: string, manifestUrl?: string): boolean {
   const raw = uri.trim();
@@ -39,7 +79,11 @@ export function filterAdsFromM3U8(
 ): string {
   if (!m3u8Content) return '';
 
-  const lines = m3u8Content.split(/\r?\n/);
+  const normalizedContent = applyKnownSourceAdRules(
+    m3u8Content,
+    manifestUrl
+  );
+  const lines = normalizedContent.split(/\r?\n/);
   const output: string[] = [];
   let pendingSegmentTags: string[] = [];
   let inCueAd = false;
