@@ -3,7 +3,7 @@
 import { db } from '@/lib/db';
 
 import { AdminConfig } from './admin.types';
-import { DEFAULT_CONFIG_FILE } from './default-sources';
+import { decorateSourceName, DEFAULT_CONFIG_FILE } from './default-sources';
 
 export interface ApiSite {
   key: string;
@@ -463,7 +463,10 @@ export async function getCacheTime(): Promise<number> {
 
 export async function getAvailableApiSites(user?: string): Promise<ApiSite[]> {
   const config = await getConfig();
-  const allApiSites = config.SourceConfig.filter((s) => !s.disabled);
+  const allApiSites = config.SourceConfig.filter((s) => !s.disabled).map((s) => ({
+    ...s,
+    name: decorateSourceName(s.key, s.name),
+  }));
 
   if (!user) {
     return allApiSites;
