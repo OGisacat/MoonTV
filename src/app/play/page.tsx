@@ -1305,7 +1305,7 @@ function PlayPageClient() {
         playbackRate: true,
         aspectRatio: false,
         fullscreen: !useWebFullscreenOnly,
-        fullscreenWeb: true,
+        fullscreenWeb: !useWebFullscreenOnly,
         subtitleOffset: false,
         miniProgressBar: false,
         mutex: true,
@@ -1487,6 +1487,23 @@ function PlayPageClient() {
               handleNextEpisode();
             },
           },
+          ...(useWebFullscreenOnly
+            ? [
+                {
+                  name: 'ios-fullscreen',
+                  position: 'right' as const,
+                  index: 70,
+                  html: '<i class="art-icon flex"><svg width="22" height="22" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg"><path fill="currentColor" d="M625.777778 256h142.222222V398.222222h113.777778V142.222222H625.777778v113.777778zM256 398.222222V256H398.222222v-113.777778H142.222222V398.222222h113.777778zM768 625.777778v142.222222H625.777778v113.777778h256V625.777778h-113.777778zM398.222222 768H256V625.777778h-113.777778v256H398.222222v-113.777778z"/></svg></i>',
+                  tooltip: '全屏',
+                  click: function () {
+                    if (artPlayerRef.current) {
+                      artPlayerRef.current.fullscreenWeb =
+                        !artPlayerRef.current.fullscreenWeb;
+                    }
+                  },
+                },
+              ]
+            : []),
         ],
       });
 
