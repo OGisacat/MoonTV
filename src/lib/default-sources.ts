@@ -14,7 +14,7 @@ export const DEFAULT_CONFIG_FILE = JSON.stringify(
       },
       ruyi: {
         api: 'https://cj.rycjapi.com/api.php/provide/vod',
-        name: '如意资源 🟢未见插播',
+        name: '如意资源 🔴有插播',
       },
       bfzy: {
         api: 'https://bfzyapi.com/api.php/provide/vod',
@@ -22,16 +22,16 @@ export const DEFAULT_CONFIG_FILE = JSON.stringify(
       },
       tyyszy: {
         api: 'https://tyyszy.com/api.php/provide/vod',
-        name: '天涯资源 🟢仅水印',
+        name: '天涯资源 🔴有插播',
       },
       ffzy: {
         api: 'http://ffzy5.tv/api.php/provide/vod',
-        name: '非凡影视 🟡广告有争议',
+        name: '非凡影视 🔴有插播',
         detail: 'http://ffzy5.tv',
       },
       zy360: {
         api: 'https://360zy.com/api.php/provide/vod',
-        name: '360资源 🟢仅水印',
+        name: '360资源 🔴有插播',
       },
       maotaizy: {
         api: 'https://caiji.maotaizy.cc/api.php/provide/vod',
@@ -39,7 +39,7 @@ export const DEFAULT_CONFIG_FILE = JSON.stringify(
       },
       wolong: {
         api: 'https://wolongzyw.com/api.php/provide/vod',
-        name: '卧龙资源 🟢仅水印',
+        name: '卧龙资源 🟡插播证据冲突',
       },
       jisu: {
         api: 'https://jszyapi.com/api.php/provide/vod',
@@ -56,7 +56,7 @@ export const DEFAULT_CONFIG_FILE = JSON.stringify(
       },
       mdzy: {
         api: 'https://www.mdzyapi.com/api.php/provide/vod',
-        name: '魔都资源 🟢仅水印',
+        name: '魔都资源 🔴有插播',
       },
       zuid: {
         api: 'https://api.zuidapi.com/api.php/provide/vod',
@@ -76,7 +76,7 @@ export const DEFAULT_CONFIG_FILE = JSON.stringify(
       },
       ikun: {
         api: 'https://ikunzyapi.com/api.php/provide/vod',
-        name: 'iKun资源 🟢仅水印',
+        name: 'iKun资源 🔴有插播',
       },
       lzi: {
         api: 'https://cj.lziapi.com/api.php/provide/vod',
@@ -102,22 +102,22 @@ export const SOURCE_AD_LEGEND = {
 export const SOURCE_AD_LABELS: Record<string, string> = {
   dyttzy: '🔴有插播',
   heimuer: '🟢无插播',
-  ruyi: '🟢未见插播',
+  ruyi: '🔴有插播',
   bfzy: '🔴有插播',
-  tyyszy: '🟢仅水印',
-  ffzy: '🟡广告有争议',
-  zy360: '🟢仅水印',
+  tyyszy: '🔴有插播',
+  ffzy: '🔴有插播',
+  zy360: '🔴有插播',
   maotaizy: '🟢仅水印',
-  wolong: '🟢仅水印',
+  wolong: '🟡插播证据冲突',
   jisu: '🟢仅水印',
   dbzy: '🟢仅水印',
   mozhua: '🟡插播未知',
-  mdzy: '🟢仅水印',
+  mdzy: '🔴有插播',
   zuid: '🟢未见插播',
   yinghua: '🔴有插播',
   wujin: '🔴有插播',
   wwzy: '🟢仅水印',
-  ikun: '🟢仅水印',
+  ikun: '🔴有插播',
   lzi: '🔴有插播',
   xiaomaomi: '🟡插播未知',
 };

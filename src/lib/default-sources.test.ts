@@ -3,7 +3,7 @@ import { decorateSourceName } from './default-sources';
 describe('decorateSourceName', () => {
   it('adds an ad label to a legacy stored source name', () => {
     expect(decorateSourceName('ikun', 'iKun资源')).toBe(
-      'iKun资源 🟢仅水印'
+      'iKun资源 🔴有插播'
     );
     expect(decorateSourceName('lzi', '量子资源站')).toBe(
       '量子资源站 🔴有插播'
