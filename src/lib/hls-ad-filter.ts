@@ -1,5 +1,5 @@
 const AD_URI_PATTERN =
-  /(?:^|[\/?&._=-])(?:ads?|advert(?:isement|ising)?|commercial|preroll|midroll|postroll|promo|vast|ima)(?:[\/?&._=-]|$)/i;
+  /(?:^|[/?&._=-])(?:ads?|advert(?:isement|ising)?|commercial|preroll|midroll|postroll|promo|vast|ima)(?:[/?&._=-]|$)/i;
 
 const INTERSTITIAL_DATERANGE_PATTERN =
   /^#EXT-X-DATERANGE:.*(?:CLASS="?(?:com\.apple\.hls\.interstitial|ads?|advert(?:isement|ising)?|commercial)|X-ASSET-(?:URI|LIST)=|SCTE35-OUT=)/i;
