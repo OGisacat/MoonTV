@@ -486,8 +486,29 @@ function PlayPageClient() {
     }
   };
 
+  const setIOSManualLandscape = (enabled: boolean) => {
+    if (typeof document === 'undefined') return;
+
+    artRef.current?.classList.toggle('ios-manual-landscape-player', enabled);
+    document.documentElement.classList.toggle(
+      'ios-manual-landscape-page',
+      enabled
+    );
+    document.body.classList.toggle('ios-manual-landscape-page', enabled);
+
+    // Recalculate ArtPlayer layout after the CSS transform has been applied.
+    requestAnimationFrame(() => {
+      try {
+        artPlayerRef.current?.emit('resize');
+      } catch {
+        // ignore
+      }
+    });
+  };
+
   // 清理播放器资源的统一函数
   const cleanupPlayer = () => {
+    setIOSManualLandscape(false);
     if (artPlayerRef.current) {
       try {
         // 销毁 HLS 实例
@@ -1281,11 +1302,7 @@ function PlayPageClient() {
       Artplayer.USE_RAF = false;
       Artplayer.FULLSCREEN_WEB_IN_BODY = true;
 
-      // iOS native video fullscreen follows the device orientation lock, which
-      // can leave landscape video in a narrow portrait fullscreen. Keep iOS in
-      // ArtPlayer's web fullscreen instead: autoOrientation can rotate the
-      // player itself without relying on the system orientation lock.
-      const useWebFullscreenOnly = isIOSMobileDevice();
+      const isIOSMobile = isIOSMobileDevice();
 
       artPlayerRef.current = new Artplayer({
         container: artRef.current,
@@ -1304,8 +1321,8 @@ function PlayPageClient() {
         flip: false,
         playbackRate: true,
         aspectRatio: false,
-        fullscreen: !useWebFullscreenOnly,
-        fullscreenWeb: !useWebFullscreenOnly,
+        fullscreen: true,
+        fullscreenWeb: !isIOSMobile,
         subtitleOffset: false,
         miniProgressBar: false,
         mutex: true,
@@ -1316,7 +1333,7 @@ function PlayPageClient() {
         lang: 'zh-cn',
         hotkey: false,
         fastForward: true,
-        autoOrientation: true,
+        autoOrientation: !isIOSMobile,
         lock: true,
         moreVideoAttr: {
           crossOrigin: 'anonymous',
@@ -1397,6 +1414,7 @@ function PlayPageClient() {
                   ) {
                     artPlayerRef.current.video.hls.destroy();
                   }
+                  setIOSManualLandscape(false);
                   artPlayerRef.current.destroy();
                   artPlayerRef.current = null;
                 }
@@ -1487,19 +1505,21 @@ function PlayPageClient() {
               handleNextEpisode();
             },
           },
-          ...(useWebFullscreenOnly
+          ...(isIOSMobile
             ? [
                 {
-                  name: 'ios-fullscreen',
+                  name: 'ios-manual-landscape',
                   position: 'right' as const,
-                  index: 70,
-                  html: '<i class="art-icon flex"><svg width="22" height="22" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg"><path fill="currentColor" d="M625.777778 256h142.222222V398.222222h113.777778V142.222222H625.777778v113.777778zM256 398.222222V256H398.222222v-113.777778H142.222222V398.222222h113.777778zM768 625.777778v142.222222H625.777778v113.777778h256V625.777778h-113.777778zM398.222222 768H256V625.777778h-113.777778v256H398.222222v-113.777778z"/></svg></i>',
-                  tooltip: '全屏',
+                  index: 65,
+                  html: '<i class="art-icon flex"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M4 8V4h4M20 16v4h-4M5.5 18.5A8 8 0 0 1 18.5 5.5M18.5 5.5H14.5M18.5 5.5V9.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></i>',
+                  tooltip: '手动横屏',
                   click: function () {
-                    if (artPlayerRef.current) {
-                      artPlayerRef.current.fullscreenWeb =
-                        !artPlayerRef.current.fullscreenWeb;
-                    }
+                    const enabled =
+                      !artRef.current?.classList.contains(
+                        'ios-manual-landscape-player'
+                      );
+                    setIOSManualLandscape(enabled);
+                    return enabled ? '退出横屏' : '手动横屏';
                   },
                 },
               ]
