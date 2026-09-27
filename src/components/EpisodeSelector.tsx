@@ -11,6 +11,10 @@ import React, {
 
 import { SearchResult } from '@/lib/types';
 import { getVideoResolutionFromM3u8, processImageUrl } from '@/lib/utils';
+import {
+  WATCHED_EPISODE_RETENTION_DAYS,
+  WatchedEpisodeMap,
+} from '@/lib/watched-episodes';
 
 // 定义视频信息类型
 interface VideoInfo {
@@ -42,6 +46,8 @@ interface EpisodeSelectorProps {
   sourceSearchError?: string | null;
   /** 预计算的测速结果，避免重复测速 */
   precomputedVideoInfo?: Map<string, VideoInfo>;
+  /** 最近看过的集数 -> 时间戳 */
+  watchedEpisodes?: WatchedEpisodeMap;
 }
 
 /**
@@ -61,6 +67,7 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
   sourceSearchLoading = false,
   sourceSearchError = null,
   precomputedVideoInfo,
+  watchedEpisodes = {},
 }) => {
   const router = useRouter();
   const pageCount = Math.ceil(totalEpisodes / episodesPerPage);
@@ -449,16 +456,35 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
               return episodes;
             })().map((episodeNumber) => {
               const isActive = episodeNumber === value;
+              const isWatched = Boolean(watchedEpisodes[String(episodeNumber)]);
               return (
                 <button
                   key={episodeNumber}
                   onClick={() => handleEpisodeClick(episodeNumber - 1)}
-                  className={`h-10 min-w-10 px-3 py-2 flex items-center justify-center text-sm font-medium rounded-md transition-all duration-200 whitespace-nowrap font-mono
+                  title={
+                    isWatched
+                      ? `${WATCHED_EPISODE_RETENTION_DAYS} 天内看过`
+                      : undefined
+                  }
+                  className={`relative h-10 min-w-10 px-3 py-2 flex items-center justify-center text-sm font-medium rounded-md transition-all duration-200 whitespace-nowrap font-mono
                     ${isActive
                       ? 'bg-green-500 text-white shadow-lg shadow-green-500/25 dark:bg-green-600'
-                      : 'bg-gray-200 text-gray-700 hover:bg-gray-300 hover:scale-105 dark:bg-white/10 dark:text-gray-300 dark:hover:bg-white/20'
+                      : isWatched
+                        ? 'bg-gray-300 text-gray-400 hover:bg-gray-300 hover:scale-105 dark:bg-white/5 dark:text-gray-500 dark:hover:bg-white/10'
+                        : 'bg-gray-200 text-gray-700 hover:bg-gray-300 hover:scale-105 dark:bg-white/10 dark:text-gray-300 dark:hover:bg-white/20'
                     }`.trim()}
                 >
+                  {isWatched && (
+                    <span
+                      className={`absolute -top-1 -right-1 w-4 h-4 rounded-full text-[10px] leading-4 text-center font-bold shadow-sm ${isActive
+                        ? 'bg-white text-green-600'
+                        : 'bg-gray-500 text-white dark:bg-gray-600'
+                      }`}
+                      aria-label='最近看过'
+                    >
+                      ✓
+                    </span>
+                  )}
                   {(() => {
                     const title = episodes_titles?.[episodeNumber - 1];
                     if (!title) {
