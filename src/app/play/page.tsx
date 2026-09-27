@@ -1786,8 +1786,8 @@ function PlayPageClient() {
           const tapDelay = Math.max(250, Artplayer.DBCLICK_TIME || 300) + 20;
           mobileTapTimerRef.current = setTimeout(() => {
             const player = artPlayerRef.current;
-            if (player) {
-              player.toggle();
+            if (player?.paused) {
+              player.play();
             }
             mobileTapTimerRef.current = null;
           }, tapDelay);
