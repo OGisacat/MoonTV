@@ -202,6 +202,7 @@ function PlayPageClient() {
 
   const artPlayerRef = useRef<any>(null);
   const artRef = useRef<HTMLDivElement | null>(null);
+  const mobileTapTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   // Wake Lock 相关
   const wakeLockRef = useRef<WakeLockSentinel | null>(null);
@@ -476,6 +477,11 @@ function PlayPageClient() {
 
   // 清理播放器资源的统一函数
   const cleanupPlayer = () => {
+    if (mobileTapTimerRef.current) {
+      clearTimeout(mobileTapTimerRef.current);
+      mobileTapTimerRef.current = null;
+    }
+
     if (artPlayerRef.current) {
       try {
         // 销毁 HLS 实例
@@ -1289,6 +1295,20 @@ function PlayPageClient() {
       Artplayer.USE_RAF = false;
       Artplayer.FULLSCREEN_WEB_IN_BODY = true;
 
+      const isMobileDevice =
+        /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
+          navigator.userAgent
+        ) ||
+        (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
+      // ArtPlayer toggles play/pause immediately on the first tap. Disable its
+      // mobile click handlers so we can defer a single tap briefly and let a
+      // second tap turn the gesture into "+10 seconds" without a pause flash.
+      if (isMobileDevice) {
+        Artplayer.MOBILE_CLICK_PLAY = false;
+        Artplayer.MOBILE_DBCLICK_PLAY = false;
+      }
+
       artPlayerRef.current = new Artplayer({
         container: artRef.current,
         url: videoUrl,
@@ -1491,6 +1511,42 @@ function PlayPageClient() {
           },
         ],
       });
+
+      if (isMobileDevice) {
+        artPlayerRef.current.on('click', () => {
+          if (mobileTapTimerRef.current) {
+            clearTimeout(mobileTapTimerRef.current);
+          }
+
+          const tapDelay = Math.max(250, Artplayer.DBCLICK_TIME || 300) + 20;
+          mobileTapTimerRef.current = setTimeout(() => {
+            const player = artPlayerRef.current;
+            if (player) {
+              player.toggle();
+            }
+            mobileTapTimerRef.current = null;
+          }, tapDelay);
+        });
+
+        artPlayerRef.current.on('dblclick', () => {
+          if (mobileTapTimerRef.current) {
+            clearTimeout(mobileTapTimerRef.current);
+            mobileTapTimerRef.current = null;
+          }
+
+          const player = artPlayerRef.current;
+          if (!player) return;
+
+          const currentTime = player.currentTime || 0;
+          const duration = player.duration || 0;
+          const targetTime = duration
+            ? Math.min(currentTime + 10, duration)
+            : currentTime + 10;
+
+          player.currentTime = targetTime;
+          player.notice.show = '快进 10 秒';
+        });
+      }
 
       // 监听播放器事件
       artPlayerRef.current.on('ready', () => {
