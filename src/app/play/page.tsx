@@ -51,6 +51,39 @@ function isIOSMobileDevice(): boolean {
   );
 }
 
+const WATCHED_EPISODE_RETENTION_MS = 180 * 24 * 60 * 60 * 1000;
+const WATCHED_EPISODE_REFRESH_MS = 24 * 60 * 60 * 1000;
+
+function pruneWatchedEpisodes(
+  watched: Record<string, number> | undefined,
+  now = Date.now()
+): Record<string, number> {
+  if (!watched) return {};
+
+  return Object.fromEntries(
+    Object.entries(watched).filter(
+      ([, timestamp]) =>
+        Number.isFinite(timestamp) &&
+        timestamp > 0 &&
+        now - timestamp <= WATCHED_EPISODE_RETENTION_MS
+    )
+  );
+}
+
+function shouldMarkEpisodeWatched(
+  currentTime: number,
+  duration: number
+): boolean {
+  if (!Number.isFinite(currentTime) || !Number.isFinite(duration) || duration <= 0) {
+    return false;
+  }
+
+  // Long episodes: 60 seconds is enough to count as watched.
+  // Short clips: use 10% of duration, but never less than 5 seconds.
+  const threshold = Math.min(60, Math.max(5, duration * 0.1));
+  return currentTime >= threshold;
+}
+
 function PlayPageClient() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -130,6 +163,13 @@ function PlayPageClient() {
   }, [needPrefer]);
   // 集数相关
   const [currentEpisodeIndex, setCurrentEpisodeIndex] = useState(0);
+  const [watchedEpisodes, setWatchedEpisodes] = useState<Record<string, number>>(
+    {}
+  );
+  const watchedEpisodesRef = useRef<Record<string, number>>({});
+  useEffect(() => {
+    watchedEpisodesRef.current = watchedEpisodes;
+  }, [watchedEpisodes]);
 
   const currentSourceRef = useRef(currentSource);
   const currentIdRef = useRef(currentId);
@@ -968,6 +1008,56 @@ function PlayPageClient() {
     initFromHistory();
   }, []);
 
+  // 加载并持续同步当前影片的 180 天已看集数。
+  // 兼容旧记录：如果历史记录还没有 watched_episodes，则至少恢复最后观看的一集。
+  useEffect(() => {
+    if (!currentSource || !currentId) {
+      watchedEpisodesRef.current = {};
+      setWatchedEpisodes({});
+      return;
+    }
+
+    const applyPlayRecords = (records: Record<string, any>) => {
+      const key = generateStorageKey(currentSource, currentId);
+      const record = records[key];
+      const now = Date.now();
+
+      if (!record) {
+        watchedEpisodesRef.current = {};
+        setWatchedEpisodes({});
+        return;
+      }
+
+      let nextWatched = pruneWatchedEpisodes(record.watched_episodes, now);
+
+      if (
+        Object.keys(nextWatched).length === 0 &&
+        record.save_time &&
+        now - record.save_time <= WATCHED_EPISODE_RETENTION_MS &&
+        shouldMarkEpisodeWatched(record.play_time || 0, record.total_time || 0) &&
+        record.index >= 1
+      ) {
+        nextWatched = {
+          [String(record.index)]: record.save_time,
+        };
+      }
+
+      watchedEpisodesRef.current = nextWatched;
+      setWatchedEpisodes(nextWatched);
+    };
+
+    getAllPlayRecords()
+      .then(applyPlayRecords)
+      .catch((err) => console.warn('读取已看集数失败:', err));
+
+    const unsubscribe = subscribeToDataUpdates(
+      'playRecordsUpdated',
+      applyPlayRecords
+    );
+
+    return unsubscribe;
+  }, [currentSource, currentId]);
+
   // 跳过片头片尾配置处理
   useEffect(() => {
     // 仅在初次挂载时检查跳过片头片尾配置
@@ -1234,6 +1324,29 @@ function PlayPageClient() {
     }
 
     try {
+      const now = Date.now();
+      let nextWatched = pruneWatchedEpisodes(watchedEpisodesRef.current, now);
+      const episodeKey = String(currentEpisodeIndexRef.current + 1);
+      const previousWatchedAt = nextWatched[episodeKey] || 0;
+
+      if (
+        shouldMarkEpisodeWatched(currentTime, duration) &&
+        now - previousWatchedAt >= WATCHED_EPISODE_REFRESH_MS
+      ) {
+        nextWatched = {
+          ...nextWatched,
+          [episodeKey]: now,
+        };
+      }
+
+      if (
+        JSON.stringify(nextWatched) !==
+        JSON.stringify(watchedEpisodesRef.current)
+      ) {
+        watchedEpisodesRef.current = nextWatched;
+        setWatchedEpisodes(nextWatched);
+      }
+
       await savePlayRecord(currentSourceRef.current, currentIdRef.current, {
         title: videoTitleRef.current,
         source_name: detailRef.current?.source_name || '',
@@ -1243,11 +1356,12 @@ function PlayPageClient() {
         total_episodes: detailRef.current?.episodes.length || 1,
         play_time: Math.floor(currentTime),
         total_time: Math.floor(duration),
-        save_time: Date.now(),
+        save_time: now,
         search_title: searchTitle,
+        watched_episodes: nextWatched,
       });
 
-      lastSaveTimeRef.current = Date.now();
+      lastSaveTimeRef.current = now;
       console.log('播放进度已保存:', {
         title: videoTitleRef.current,
         episode: currentEpisodeIndexRef.current + 1,
@@ -2163,6 +2277,7 @@ function PlayPageClient() {
                 sourceSearchLoading={sourceSearchLoading}
                 sourceSearchError={sourceSearchError}
                 precomputedVideoInfo={precomputedVideoInfo}
+                watchedEpisodes={watchedEpisodes}
               />
             </div>
           </div>
