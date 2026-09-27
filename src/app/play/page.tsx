@@ -38,6 +38,7 @@ import PageLayout from '@/components/PageLayout';
 declare global {
   interface HTMLVideoElement {
     hls?: any;
+    webkitShowPlaybackTargetPicker?: () => void;
   }
 }
 
@@ -462,14 +463,66 @@ function PlayPageClient() {
       sources.forEach((s) => s.remove());
       const sourceEl = document.createElement('source');
       sourceEl.src = url;
+      if (/\.m3u8(?:$|[?#])/i.test(url)) {
+        sourceEl.type = 'application/vnd.apple.mpegurl';
+      }
       video.appendChild(sourceEl);
     }
 
     // 始终允许远程播放（AirPlay / Cast）
     video.disableRemotePlayback = false;
+    video.setAttribute('x-webkit-airplay', 'allow');
     // 如果曾经有禁用属性，移除之
     if (video.hasAttribute('disableRemotePlayback')) {
       video.removeAttribute('disableRemotePlayback');
+    }
+  };
+
+  const showTVCastPicker = async () => {
+    const player = artPlayerRef.current;
+    const video = player?.video as
+      | (HTMLVideoElement & {
+          remote?: {
+            state?: string;
+            prompt?: () => Promise<void>;
+          };
+        })
+      | undefined;
+
+    if (!player || !video) return;
+
+    ensureVideoSource(video, videoUrl);
+
+    try {
+      // Safari / iPhone / iPad: use the native AirPlay target picker.
+      if (typeof video.webkitShowPlaybackTargetPicker === 'function') {
+        video.webkitShowPlaybackTargetPicker();
+        return;
+      }
+
+      // Chromium and browsers implementing the Remote Playback API can expose
+      // Chromecast / remote media targets through the browser's native picker.
+      if (video.remote && typeof video.remote.prompt === 'function') {
+        await video.remote.prompt();
+        if (video.remote.state === 'connected') {
+          player.notice.show = '已连接到 TV';
+        }
+        return;
+      }
+
+      player.notice.show =
+        '当前浏览器不支持 TV 投屏；iPhone 请使用 Safari / AirPlay';
+    } catch (err) {
+      const errorName = err instanceof DOMException ? err.name : '';
+      if (errorName === 'AbortError') return;
+
+      if (errorName === 'NotFoundError') {
+        player.notice.show = '未发现可投屏设备';
+        return;
+      }
+
+      console.warn('TV 投屏失败:', err);
+      player.notice.show = '投屏失败，请确认手机和电视在同一网络';
     }
   };
 
@@ -1493,7 +1546,7 @@ function PlayPageClient() {
         mutex: true,
         playsInline: true,
         autoPlayback: false,
-        airplay: true,
+        airplay: false,
         theme: '#22c55e',
         lang: 'zh-cn',
         hotkey: false,
@@ -1661,6 +1714,16 @@ function PlayPageClient() {
         ],
         // 控制栏配置
         controls: [
+          {
+            name: 'tv-cast',
+            position: 'right',
+            index: 50,
+            html: '<i class="art-icon flex"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M3 18h3v3H3v-3Zm0-5a8 8 0 0 1 8 8H8a5 5 0 0 0-5-5v-3Zm0-5c7.18 0 13 5.82 13 13h-3C13 15.48 8.52 11 3 11V8Zm3-5h13a2 2 0 0 1 2 2v11h-3V6H6V3Z" fill="currentColor"/></svg></i>',
+            tooltip: 'TV 投屏',
+            click: function () {
+              void showTVCastPicker();
+            },
+          },
           {
             name: 'seek-back-10',
             position: 'left',
