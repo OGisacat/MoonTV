@@ -520,6 +520,9 @@ function PlayPageClient() {
     const themeSelector = 'meta[data-ios-manual-landscape-theme-color]';
 
     if (!enabled) {
+      if (artPlayerRef.current) {
+        artPlayerRef.current.isRotate = false;
+      }
       player.classList.remove('ios-manual-landscape-player');
       html.classList.remove('ios-manual-landscape-page');
       body.classList.remove('ios-manual-landscape-page');
@@ -540,6 +543,9 @@ function PlayPageClient() {
     }
 
     player.classList.add('ios-manual-landscape-player');
+    if (artPlayerRef.current) {
+      artPlayerRef.current.isRotate = true;
+    }
     html.classList.add('ios-manual-landscape-page');
     body.classList.add('ios-manual-landscape-page');
 
@@ -1655,6 +1661,37 @@ function PlayPageClient() {
         ],
         // 控制栏配置
         controls: [
+          {
+            name: 'seek-back-10',
+            position: 'left',
+            index: 11,
+            html: '<span class="art-icon flex items-center justify-center text-[11px] font-semibold leading-none">-10</span>',
+            tooltip: '后退 10 秒',
+            click: function () {
+              const player = artPlayerRef.current;
+              if (!player) return;
+              const target = Math.max(0, (player.currentTime || 0) - 10);
+              player.seek = target;
+              player.notice.show = '已后退 10 秒';
+            },
+          },
+          {
+            name: 'seek-forward-10',
+            position: 'left',
+            index: 12,
+            html: '<span class="art-icon flex items-center justify-center text-[11px] font-semibold leading-none">+10</span>',
+            tooltip: '前进 10 秒',
+            click: function () {
+              const player = artPlayerRef.current;
+              if (!player) return;
+              const duration = player.duration || 0;
+              const target = duration
+                ? Math.min(duration, (player.currentTime || 0) + 10)
+                : (player.currentTime || 0) + 10;
+              player.seek = target;
+              player.notice.show = '已前进 10 秒';
+            },
+          },
           {
             position: 'left',
             index: 13,
