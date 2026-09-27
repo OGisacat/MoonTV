@@ -1743,7 +1743,7 @@ function PlayPageClient() {
           {
             name: 'seek-forward-10',
             position: 'right',
-            index: 45,
+            index: 68,
             html: '<span class="art-icon flex items-center justify-center text-[11px] font-semibold leading-none">+10</span>',
             tooltip: '前进 10 秒',
             click: function () {
