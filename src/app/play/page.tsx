@@ -1517,6 +1517,8 @@ function PlayPageClient() {
     try {
       // 创建新的播放器实例
       Artplayer.PLAYBACK_RATE = [0.5, 0.75, 1, 1.25, 1.5, 2, 3];
+      Artplayer.FAST_FORWARD_VALUE = 2;
+      Artplayer.FAST_FORWARD_TIME = 500;
       Artplayer.USE_RAF = false;
       Artplayer.FULLSCREEN_WEB_IN_BODY = true;
 
@@ -1740,8 +1742,8 @@ function PlayPageClient() {
           },
           {
             name: 'seek-forward-10',
-            position: 'left',
-            index: 12,
+            position: 'right',
+            index: 45,
             html: '<span class="art-icon flex items-center justify-center text-[11px] font-semibold leading-none">+10</span>',
             tooltip: '前进 10 秒',
             click: function () {
