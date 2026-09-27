@@ -39,7 +39,6 @@ export interface PlayRecord {
   play_time: number; // 播放进度（秒）
   total_time: number; // 总进度（秒）
   save_time: number; // 记录保存时间（时间戳）
-  watched_episodes?: Record<string, number>; // 最近看过的集数 -> 时间戳
   search_title?: string; // 搜索时使用的标题
 }
 

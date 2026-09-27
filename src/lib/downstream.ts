@@ -32,13 +32,7 @@ async function searchWithCache(
   const cached = getCachedSearchPage(apiSite.key, query, page);
   if (cached) {
     if (cached.status === 'ok') {
-      return {
-        results: cached.data.map((result) => ({
-          ...result,
-          source_name: apiSite.name,
-        })),
-        pageCount: cached.pageCount,
-      };
+      return { results: cached.data, pageCount: cached.pageCount };
     } else {
       return { results: [] };
     }

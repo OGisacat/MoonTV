@@ -2,37 +2,33 @@
 
 'use client';
 
-import { Monitor, Moon, Sun } from 'lucide-react';
+import { Moon, Sun } from 'lucide-react';
 import { usePathname } from 'next/navigation';
 import { useTheme } from 'next-themes';
 import { useEffect, useState } from 'react';
 
 export function ThemeToggle() {
   const [mounted, setMounted] = useState(false);
-  const { setTheme, theme, resolvedTheme } = useTheme();
+  const { setTheme, resolvedTheme } = useTheme();
   const pathname = usePathname();
 
-  const setThemeColor = (resolved?: string) => {
-    let meta = document.querySelector(
-      'meta[data-runtime-theme-color]'
-    ) as HTMLMetaElement | null;
-
+  const setThemeColor = (theme?: string) => {
+    const meta = document.querySelector('meta[name="theme-color"]');
     if (!meta) {
-      meta = document.createElement('meta');
+      const meta = document.createElement('meta');
       meta.name = 'theme-color';
-      meta.dataset.runtimeThemeColor = 'true';
+      meta.content = theme === 'dark' ? '#0c111c' : '#f9fbfe';
       document.head.appendChild(meta);
+    } else {
+      meta.setAttribute('content', theme === 'dark' ? '#0c111c' : '#f9fbfe');
     }
-
-    meta.content = resolved === 'dark' ? '#0c111c' : '#f9fbfe';
   };
 
   useEffect(() => {
     setMounted(true);
   }, []);
 
-  // resolvedTheme changes immediately when iOS switches between light/dark
-  // while the selected mode is "system".
+  // 监听主题变化和路由变化，确保主题色始终同步
   useEffect(() => {
     if (mounted) {
       setThemeColor(resolvedTheme);
@@ -40,25 +36,14 @@ export function ThemeToggle() {
   }, [mounted, resolvedTheme, pathname]);
 
   if (!mounted) {
+    // 渲染一个占位符以避免布局偏移
     return <div className='w-10 h-10' />;
   }
 
-  const currentTheme = theme || 'system';
-  const modeLabel =
-    currentTheme === 'system'
-      ? '跟随系统'
-      : currentTheme === 'dark'
-        ? '深色模式'
-        : '浅色模式';
-
-  const cycleTheme = () => {
-    const targetTheme =
-      currentTheme === 'system'
-        ? 'light'
-        : currentTheme === 'light'
-          ? 'dark'
-          : 'system';
-
+  const toggleTheme = () => {
+    // 检查浏览器是否支持 View Transitions API
+    const targetTheme = resolvedTheme === 'dark' ? 'light' : 'dark';
+    setThemeColor(targetTheme);
     if (!(document as any).startViewTransition) {
       setTheme(targetTheme);
       return;
@@ -71,17 +56,14 @@ export function ThemeToggle() {
 
   return (
     <button
-      onClick={cycleTheme}
+      onClick={toggleTheme}
       className='w-10 h-10 p-2 rounded-full flex items-center justify-center text-gray-600 hover:bg-gray-200/50 dark:text-gray-300 dark:hover:bg-gray-700/50 transition-colors'
-      aria-label={`主题：${modeLabel}，点击切换`}
-      title={`主题：${modeLabel}`}
+      aria-label='Toggle theme'
     >
-      {currentTheme === 'system' ? (
-        <Monitor className='w-full h-full' />
-      ) : currentTheme === 'dark' ? (
-        <Moon className='w-full h-full' />
-      ) : (
+      {resolvedTheme === 'dark' ? (
         <Sun className='w-full h-full' />
+      ) : (
+        <Moon className='w-full h-full' />
       )}
     </button>
   );

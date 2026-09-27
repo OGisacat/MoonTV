@@ -21,15 +21,8 @@ import {
   saveSkipConfig,
   subscribeToDataUpdates,
 } from '@/lib/db.client';
-import { filterAdsFromM3U8 } from '@/lib/hls-ad-filter';
 import { SearchResult } from '@/lib/types';
 import { getVideoResolutionFromM3u8, processImageUrl } from '@/lib/utils';
-import {
-  mergeWatchedEpisodes,
-  pruneWatchedEpisodes,
-  shouldMarkEpisodeWatched,
-  WatchedEpisodeMap,
-} from '@/lib/watched-episodes';
 
 import EpisodeSelector from '@/components/EpisodeSelector';
 import PageLayout from '@/components/PageLayout';
@@ -38,7 +31,6 @@ import PageLayout from '@/components/PageLayout';
 declare global {
   interface HTMLVideoElement {
     hls?: any;
-    webkitShowPlaybackTargetPicker?: () => void;
   }
 }
 
@@ -48,17 +40,6 @@ interface WakeLockSentinel {
   release(): Promise<void>;
   addEventListener(type: 'release', listener: () => void): void;
   removeEventListener(type: 'release', listener: () => void): void;
-}
-
-function isIOSMobileDevice(): boolean {
-  if (typeof navigator === 'undefined') return false;
-
-  // iPadOS may identify itself as MacIntel; touch support distinguishes it
-  // from a desktop Mac. iPhone/iPod are covered by the user agent check.
-  return (
-    /iPhone|iPad|iPod/i.test(navigator.userAgent) ||
-    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
-  );
 }
 
 function PlayPageClient() {
@@ -140,11 +121,6 @@ function PlayPageClient() {
   }, [needPrefer]);
   // 集数相关
   const [currentEpisodeIndex, setCurrentEpisodeIndex] = useState(0);
-  const [watchedEpisodes, setWatchedEpisodes] = useState<WatchedEpisodeMap>({});
-  const watchedEpisodesRef = useRef<WatchedEpisodeMap>({});
-  useEffect(() => {
-    watchedEpisodesRef.current = watchedEpisodes;
-  }, [watchedEpisodes]);
 
   const currentSourceRef = useRef(currentSource);
   const currentIdRef = useRef(currentId);
@@ -226,8 +202,6 @@ function PlayPageClient() {
 
   const artPlayerRef = useRef<any>(null);
   const artRef = useRef<HTMLDivElement | null>(null);
-  const manualLandscapeCleanupRef = useRef<(() => void) | null>(null);
-  const manualLandscapeHideTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   // Wake Lock 相关
   const wakeLockRef = useRef<WakeLockSentinel | null>(null);
@@ -463,66 +437,14 @@ function PlayPageClient() {
       sources.forEach((s) => s.remove());
       const sourceEl = document.createElement('source');
       sourceEl.src = url;
-      if (/\.m3u8(?:$|[?#])/i.test(url)) {
-        sourceEl.type = 'application/vnd.apple.mpegurl';
-      }
       video.appendChild(sourceEl);
     }
 
     // 始终允许远程播放（AirPlay / Cast）
     video.disableRemotePlayback = false;
-    video.setAttribute('x-webkit-airplay', 'allow');
     // 如果曾经有禁用属性，移除之
     if (video.hasAttribute('disableRemotePlayback')) {
       video.removeAttribute('disableRemotePlayback');
-    }
-  };
-
-  const showTVCastPicker = async () => {
-    const player = artPlayerRef.current;
-    const video = player?.video as
-      | (HTMLVideoElement & {
-          remote?: {
-            state?: string;
-            prompt?: () => Promise<void>;
-          };
-        })
-      | undefined;
-
-    if (!player || !video) return;
-
-    ensureVideoSource(video, videoUrl);
-
-    try {
-      // Safari / iPhone / iPad: use the native AirPlay target picker.
-      if (typeof video.webkitShowPlaybackTargetPicker === 'function') {
-        video.webkitShowPlaybackTargetPicker();
-        return;
-      }
-
-      // Chromium and browsers implementing the Remote Playback API can expose
-      // Chromecast / remote media targets through the browser's native picker.
-      if (video.remote && typeof video.remote.prompt === 'function') {
-        await video.remote.prompt();
-        if (video.remote.state === 'connected') {
-          player.notice.show = '已连接到 TV';
-        }
-        return;
-      }
-
-      player.notice.show =
-        '当前浏览器不支持 TV 投屏；iPhone 请使用 Safari / AirPlay';
-    } catch (err) {
-      const errorName = err instanceof DOMException ? err.name : '';
-      if (errorName === 'AbortError') return;
-
-      if (errorName === 'NotFoundError') {
-        player.notice.show = '未发现可投屏设备';
-        return;
-      }
-
-      console.warn('TV 投屏失败:', err);
-      player.notice.show = '投屏失败，请确认手机和电视在同一网络';
     }
   };
 
@@ -552,126 +474,8 @@ function PlayPageClient() {
     }
   };
 
-  const setIOSManualLandscape = (enabled: boolean) => {
-    if (typeof window === 'undefined' || typeof document === 'undefined') {
-      return;
-    }
-
-    const player = artRef.current;
-    if (!player) return;
-
-    // Remove listeners/timers from the previous manual-landscape session.
-    manualLandscapeCleanupRef.current?.();
-    manualLandscapeCleanupRef.current = null;
-    if (manualLandscapeHideTimerRef.current) {
-      clearTimeout(manualLandscapeHideTimerRef.current);
-      manualLandscapeHideTimerRef.current = null;
-    }
-
-    const html = document.documentElement;
-    const body = document.body;
-    const themeSelector = 'meta[data-ios-manual-landscape-theme-color]';
-
-    if (!enabled) {
-      if (artPlayerRef.current) {
-        artPlayerRef.current.isRotate = false;
-      }
-      player.classList.remove('ios-manual-landscape-player');
-      html.classList.remove('ios-manual-landscape-page');
-      body.classList.remove('ios-manual-landscape-page');
-
-      for (const property of ['top', 'left', 'width', 'height']) {
-        player.style.removeProperty(property);
-      }
-      document.querySelector(themeSelector)?.remove();
-
-      requestAnimationFrame(() => {
-        try {
-          artPlayerRef.current?.emit('resize');
-        } catch {
-          // ignore
-        }
-      });
-      return;
-    }
-
-    player.classList.add('ios-manual-landscape-player');
-    if (artPlayerRef.current) {
-      artPlayerRef.current.isRotate = true;
-    }
-    html.classList.add('ios-manual-landscape-page');
-    body.classList.add('ios-manual-landscape-page');
-
-    // Keep Safari/PWA chrome black while the custom landscape view is active.
-    let themeMeta = document.querySelector(
-      themeSelector
-    ) as HTMLMetaElement | null;
-    if (!themeMeta) {
-      themeMeta = document.createElement('meta');
-      themeMeta.name = 'theme-color';
-      themeMeta.dataset.iosManualLandscapeThemeColor = 'true';
-      document.head.appendChild(themeMeta);
-    }
-    themeMeta.content = '#000000';
-
-    // Use VisualViewport rather than 100dvh/100dvw. On iPhone this accounts
-    // for the actually visible area (status bar / browser UI) and keeps the
-    // rotated player centered instead of drifting toward one side.
-    const updateLayout = () => {
-      const viewport = window.visualViewport;
-      const visibleWidth = viewport?.width ?? window.innerWidth;
-      const visibleHeight = viewport?.height ?? window.innerHeight;
-      const offsetLeft = viewport?.offsetLeft ?? 0;
-      const offsetTop = viewport?.offsetTop ?? 0;
-
-      player.style.left = `${offsetLeft + visibleWidth / 2}px`;
-      player.style.top = `${offsetTop + visibleHeight / 2}px`;
-      player.style.width = `${visibleHeight}px`;
-      player.style.height = `${visibleWidth}px`;
-
-      try {
-        artPlayerRef.current?.emit('resize');
-      } catch {
-        // ignore
-      }
-    };
-
-    updateLayout();
-
-    const visualViewport = window.visualViewport;
-    visualViewport?.addEventListener('resize', updateLayout);
-    visualViewport?.addEventListener('scroll', updateLayout);
-    window.addEventListener('resize', updateLayout);
-
-    manualLandscapeCleanupRef.current = () => {
-      visualViewport?.removeEventListener('resize', updateLayout);
-      visualViewport?.removeEventListener('scroll', updateLayout);
-      window.removeEventListener('resize', updateLayout);
-    };
-
-    // The button tap makes ArtPlayer controls visible. Force them to auto-hide
-    // shortly after entering manual landscape so progress/time controls do not
-    // remain stuck on screen.
-    manualLandscapeHideTimerRef.current = setTimeout(() => {
-      try {
-        if (
-          artRef.current?.classList.contains(
-            'ios-manual-landscape-player'
-          ) &&
-          artPlayerRef.current &&
-          !artPlayerRef.current.paused
-        ) {
-          artPlayerRef.current.controls.show = false;
-        }
-      } catch {
-        // ignore
-      }
-    }, 1400);
-  };
-
   // 清理播放器资源的统一函数
   const cleanupPlayer = () => {
-    setIOSManualLandscape(false);
     if (artPlayerRef.current) {
       try {
         // 销毁 HLS 实例
@@ -690,6 +494,26 @@ function PlayPageClient() {
       }
     }
   };
+
+  // 去广告相关函数
+  function filterAdsFromM3U8(m3u8Content: string): string {
+    if (!m3u8Content) return '';
+
+    // 按行分割M3U8内容
+    const lines = m3u8Content.split('\n');
+    const filteredLines = [];
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+
+      // 只过滤#EXT-X-DISCONTINUITY标识
+      if (!line.includes('#EXT-X-DISCONTINUITY')) {
+        filteredLines.push(line);
+      }
+    }
+
+    return filteredLines.join('\n');
+  }
 
   // 跳过片头片尾配置相关函数
   const handleSkipConfigChange = async (newConfig: {
@@ -812,7 +636,7 @@ function PlayPageClient() {
             // 如果是m3u8文件，处理内容以移除广告分段
             if (response.data && typeof response.data === 'string') {
               // 过滤掉广告段 - 实现更精确的广告过滤逻辑
-              response.data = filterAdsFromM3U8(response.data, context?.url);
+              response.data = filterAdsFromM3U8(response.data);
             }
             return onSuccess(response, stats, context, null);
           };
@@ -987,48 +811,6 @@ function PlayPageClient() {
         const allRecords = await getAllPlayRecords();
         const key = generateStorageKey(currentSource, currentId);
         const record = allRecords[key];
-
-        // 合并同一影片在不同源上的逐集观看记录。旧数据只有最后一集，
-        // 则用 save_time 作为该集的观看时间做兼容。
-        let mergedWatched: WatchedEpisodeMap = {};
-        const normalizedSearchTitle = (searchTitle || videoTitleRef.current)
-          .trim()
-          .toLowerCase();
-        const normalizedYear = (videoYearRef.current || '').trim();
-
-        for (const item of Object.values(allRecords)) {
-          const itemTitle = (item.search_title || item.title || '')
-            .trim()
-            .toLowerCase();
-          const sameTitle =
-            normalizedSearchTitle.length > 0 &&
-            itemTitle === normalizedSearchTitle;
-          const sameYear =
-            !normalizedYear || !item.year || item.year === normalizedYear;
-
-          if (!sameTitle || !sameYear) continue;
-
-          mergedWatched = mergeWatchedEpisodes(
-            mergedWatched,
-            item.watched_episodes
-          );
-
-          if (
-            (!item.watched_episodes ||
-              Object.keys(item.watched_episodes).length === 0) &&
-            item.index > 0 &&
-            item.save_time
-          ) {
-            mergedWatched[String(item.index)] = Math.max(
-              mergedWatched[String(item.index)] || 0,
-              item.save_time
-            );
-          }
-        }
-
-        mergedWatched = pruneWatchedEpisodes(mergedWatched);
-        watchedEpisodesRef.current = mergedWatched;
-        setWatchedEpisodes(mergedWatched);
 
         if (record) {
           const targetIndex = record.index - 1;
@@ -1316,18 +1098,6 @@ function PlayPageClient() {
     }
 
     try {
-      const now = Date.now();
-      let nextWatched = pruneWatchedEpisodes(watchedEpisodesRef.current, now);
-
-      if (shouldMarkEpisodeWatched(currentTime, duration)) {
-        nextWatched = {
-          ...nextWatched,
-          [String(currentEpisodeIndexRef.current + 1)]: now,
-        };
-        watchedEpisodesRef.current = nextWatched;
-        setWatchedEpisodes(nextWatched);
-      }
-
       await savePlayRecord(currentSourceRef.current, currentIdRef.current, {
         title: videoTitleRef.current,
         source_name: detailRef.current?.source_name || '',
@@ -1337,12 +1107,11 @@ function PlayPageClient() {
         total_episodes: detailRef.current?.episodes.length || 1,
         play_time: Math.floor(currentTime),
         total_time: Math.floor(duration),
-        save_time: now,
+        save_time: Date.now(),
         search_title: searchTitle,
-        watched_episodes: nextWatched,
       });
 
-      lastSaveTimeRef.current = now;
+      lastSaveTimeRef.current = Date.now();
       console.log('播放进度已保存:', {
         title: videoTitleRef.current,
         episode: currentEpisodeIndexRef.current + 1,
@@ -1517,12 +1286,8 @@ function PlayPageClient() {
     try {
       // 创建新的播放器实例
       Artplayer.PLAYBACK_RATE = [0.5, 0.75, 1, 1.25, 1.5, 2, 3];
-      Artplayer.FAST_FORWARD_VALUE = 2;
-      Artplayer.FAST_FORWARD_TIME = 500;
       Artplayer.USE_RAF = false;
       Artplayer.FULLSCREEN_WEB_IN_BODY = true;
-
-      const isIOSMobile = isIOSMobileDevice();
 
       artPlayerRef.current = new Artplayer({
         container: artRef.current,
@@ -1542,13 +1307,13 @@ function PlayPageClient() {
         playbackRate: true,
         aspectRatio: false,
         fullscreen: true,
-        fullscreenWeb: !isIOSMobile,
+        fullscreenWeb: true,
         subtitleOffset: false,
         miniProgressBar: false,
         mutex: true,
         playsInline: true,
         autoPlayback: false,
-        airplay: false,
+        airplay: true,
         theme: '#22c55e',
         lang: 'zh-cn',
         hotkey: false,
@@ -1634,7 +1399,6 @@ function PlayPageClient() {
                   ) {
                     artPlayerRef.current.video.hls.destroy();
                   }
-                  setIOSManualLandscape(false);
                   artPlayerRef.current.destroy();
                   artPlayerRef.current = null;
                 }
@@ -1717,47 +1481,6 @@ function PlayPageClient() {
         // 控制栏配置
         controls: [
           {
-            name: 'tv-cast',
-            position: 'right',
-            index: 50,
-            html: '<i class="art-icon flex"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M3 18h3v3H3v-3Zm0-5a8 8 0 0 1 8 8H8a5 5 0 0 0-5-5v-3Zm0-5c7.18 0 13 5.82 13 13h-3C13 15.48 8.52 11 3 11V8Zm3-5h13a2 2 0 0 1 2 2v11h-3V6H6V3Z" fill="currentColor"/></svg></i>',
-            tooltip: 'TV 投屏',
-            click: function () {
-              void showTVCastPicker();
-            },
-          },
-          {
-            name: 'seek-back-10',
-            position: 'left',
-            index: 11,
-            html: '<span class="art-icon flex items-center justify-center text-[11px] font-semibold leading-none">-10</span>',
-            tooltip: '后退 10 秒',
-            click: function () {
-              const player = artPlayerRef.current;
-              if (!player) return;
-              const target = Math.max(0, (player.currentTime || 0) - 10);
-              player.seek = target;
-              player.notice.show = '已后退 10 秒';
-            },
-          },
-          {
-            name: 'seek-forward-10',
-            position: 'right',
-            index: 68,
-            html: '<span class="art-icon flex items-center justify-center text-[11px] font-semibold leading-none">+10</span>',
-            tooltip: '前进 10 秒',
-            click: function () {
-              const player = artPlayerRef.current;
-              if (!player) return;
-              const duration = player.duration || 0;
-              const target = duration
-                ? Math.min(duration, (player.currentTime || 0) + 10)
-                : (player.currentTime || 0) + 10;
-              player.seek = target;
-              player.notice.show = '已前进 10 秒';
-            },
-          },
-          {
             position: 'left',
             index: 13,
             html: '<i class="art-icon flex"><svg width="22" height="22" viewBox="0 0 22 22" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z" fill="currentColor"/></svg></i>',
@@ -1766,25 +1489,6 @@ function PlayPageClient() {
               handleNextEpisode();
             },
           },
-          ...(isIOSMobile
-            ? [
-                {
-                  name: 'ios-manual-landscape',
-                  position: 'right' as const,
-                  index: 65,
-                  html: '<i class="art-icon flex"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M4 8V4h4M20 16v4h-4M5.5 18.5A8 8 0 0 1 18.5 5.5M18.5 5.5H14.5M18.5 5.5V9.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></i>',
-                  tooltip: '手动横屏',
-                  click: function () {
-                    const enabled =
-                      !artRef.current?.classList.contains(
-                        'ios-manual-landscape-player'
-                      );
-                    setIOSManualLandscape(enabled);
-                    return enabled ? '退出横屏' : '手动横屏';
-                  },
-                },
-              ]
-            : []),
         ],
       });
 
@@ -2252,7 +1956,6 @@ function PlayPageClient() {
                 sourceSearchLoading={sourceSearchLoading}
                 sourceSearchError={sourceSearchError}
                 precomputedVideoInfo={precomputedVideoInfo}
-                watchedEpisodes={watchedEpisodes}
               />
             </div>
           </div>

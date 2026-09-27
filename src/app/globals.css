@@ -15,35 +15,6 @@
 
 :root {
   --foreground-rgb: 255, 255, 255;
-  color-scheme: light;
-}
-
-html {
-  background-color: #f9fbfe;
-}
-
-html.dark {
-  color-scheme: dark;
-  background-color: #0c111c;
-}
-
-html.light {
-  color-scheme: light;
-  background-color: #f9fbfe;
-}
-
-/* Before next-themes hydrates, make first paint match the iPhone setting.
-   This avoids a white flash when Safari/PWA launches in system dark mode. */
-@media (prefers-color-scheme: dark) {
-  html:not(.light) {
-    color-scheme: dark;
-    background-color: #0c111c;
-  }
-
-  html:not(.light) body {
-    color: #e5e7eb;
-    background: #000;
-  }
 }
 
 html,
@@ -202,40 +173,4 @@ div[data-media-provider] video {
   .art-control-volume {
     display: none !important;
   }
-}
-
-
-
-
-/* iOS manual landscape mode.
-   Position and size are injected from VisualViewport so the rotated player
-   stays centered inside the actually visible area instead of assuming 100dvh. */
-html.ios-manual-landscape-page,
-body.ios-manual-landscape-page {
-  overflow: hidden !important;
-  overscroll-behavior: none !important;
-  background: #000 !important;
-}
-
-body.ios-manual-landscape-page::before {
-  content: '';
-  position: fixed;
-  inset: 0 0 auto 0;
-  height: max(env(safe-area-inset-top), 24px);
-  background: #000;
-  z-index: 2147483646;
-  pointer-events: none;
-}
-
-.ios-manual-landscape-player {
-  position: fixed !important;
-  max-width: none !important;
-  max-height: none !important;
-  margin: 0 !important;
-  border: 0 !important;
-  border-radius: 0 !important;
-  background: #000 !important;
-  transform: translate(-50%, -50%) rotate(90deg) !important;
-  transform-origin: center center !important;
-  z-index: 2147483647 !important;
 }

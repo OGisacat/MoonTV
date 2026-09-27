@@ -3,7 +3,6 @@
 import { db } from '@/lib/db';
 
 import { AdminConfig } from './admin.types';
-import { decorateSourceName, DEFAULT_CONFIG_FILE } from './default-sources';
 
 export interface ApiSite {
   key: string;
@@ -198,15 +197,14 @@ async function getInitConfig(configFile: string, subConfig: {
     AutoUpdate: false,
     LastCheck: "",
   }): Promise<AdminConfig> {
-  const effectiveConfigFile = configFile.trim() ? configFile : DEFAULT_CONFIG_FILE;
   let cfgFile: ConfigFileStruct;
   try {
-    cfgFile = JSON.parse(effectiveConfigFile) as ConfigFileStruct;
+    cfgFile = JSON.parse(configFile) as ConfigFileStruct;
   } catch (e) {
     cfgFile = {} as ConfigFileStruct;
   }
   const adminConfig: AdminConfig = {
-    ConfigFile: effectiveConfigFile,
+    ConfigFile: configFile,
     ConfigSubscribtion: subConfig,
     SiteConfig: {
       SiteName: process.env.NEXT_PUBLIC_SITE_NAME || 'MoonTV',
@@ -325,24 +323,14 @@ export async function getConfig(): Promise<AdminConfig> {
 
     // db 中无配置，执行一次初始化
     const needInit = !adminConfig;
-    let seededDefaultSources = false;
     if (!adminConfig) {
       adminConfig = await getInitConfig("");
-    } else if (
-      !adminConfig.ConfigFile?.trim() &&
-      (!adminConfig.SourceConfig || adminConfig.SourceConfig.length === 0)
-    ) {
-      // 兼容从旧版升级后仍是“空壳”的已有数据库：只在配置和源都为空时
-      // 首次注入默认源，避免覆盖用户已经维护过的自定义配置。
-      adminConfig.ConfigFile = DEFAULT_CONFIG_FILE;
-      adminConfig = refineConfig(adminConfig);
-      seededDefaultSources = true;
     }
     adminConfig = configSelfCheck(adminConfig);
     cachedConfig = adminConfig;
     cachedConfigAt = Date.now();
-    // 仅在首次初始化或一次性迁移默认源时回写，避免每次缓存过期都产生一次写库
-    if (needInit || seededDefaultSources) {
+    // 仅在首次初始化时回写，避免每次缓存过期都产生一次写库
+    if (needInit) {
       try {
         await db.saveAdminConfig(cachedConfig);
       } catch (e) {
@@ -463,10 +451,7 @@ export async function getCacheTime(): Promise<number> {
 
 export async function getAvailableApiSites(user?: string): Promise<ApiSite[]> {
   const config = await getConfig();
-  const allApiSites = config.SourceConfig.filter((s) => !s.disabled).map((s) => ({
-    ...s,
-    name: decorateSourceName(s.key, s.name),
-  }));
+  const allApiSites = config.SourceConfig.filter((s) => !s.disabled);
 
   if (!user) {
     return allApiSites;
