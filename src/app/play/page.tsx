@@ -24,6 +24,12 @@ import {
 import { filterAdsFromM3U8 } from '@/lib/hls-ad-filter';
 import { SearchResult } from '@/lib/types';
 import { getVideoResolutionFromM3u8, processImageUrl } from '@/lib/utils';
+import {
+  mergeWatchedEpisodes,
+  pruneWatchedEpisodes,
+  shouldMarkEpisodeWatched,
+  WatchedEpisodeMap,
+} from '@/lib/watched-episodes';
 
 import EpisodeSelector from '@/components/EpisodeSelector';
 import PageLayout from '@/components/PageLayout';
@@ -133,6 +139,11 @@ function PlayPageClient() {
   }, [needPrefer]);
   // 集数相关
   const [currentEpisodeIndex, setCurrentEpisodeIndex] = useState(0);
+  const [watchedEpisodes, setWatchedEpisodes] = useState<WatchedEpisodeMap>({});
+  const watchedEpisodesRef = useRef<WatchedEpisodeMap>({});
+  useEffect(() => {
+    watchedEpisodesRef.current = watchedEpisodes;
+  }, [watchedEpisodes]);
 
   const currentSourceRef = useRef(currentSource);
   const currentIdRef = useRef(currentId);
@@ -918,6 +929,48 @@ function PlayPageClient() {
         const key = generateStorageKey(currentSource, currentId);
         const record = allRecords[key];
 
+        // 合并同一影片在不同源上的逐集观看记录。旧数据只有最后一集，
+        // 则用 save_time 作为该集的观看时间做兼容。
+        let mergedWatched: WatchedEpisodeMap = {};
+        const normalizedSearchTitle = (searchTitle || videoTitleRef.current)
+          .trim()
+          .toLowerCase();
+        const normalizedYear = (videoYearRef.current || '').trim();
+
+        for (const item of Object.values(allRecords)) {
+          const itemTitle = (item.search_title || item.title || '')
+            .trim()
+            .toLowerCase();
+          const sameTitle =
+            normalizedSearchTitle.length > 0 &&
+            itemTitle === normalizedSearchTitle;
+          const sameYear =
+            !normalizedYear || !item.year || item.year === normalizedYear;
+
+          if (!sameTitle || !sameYear) continue;
+
+          mergedWatched = mergeWatchedEpisodes(
+            mergedWatched,
+            item.watched_episodes
+          );
+
+          if (
+            (!item.watched_episodes ||
+              Object.keys(item.watched_episodes).length === 0) &&
+            item.index > 0 &&
+            item.save_time
+          ) {
+            mergedWatched[String(item.index)] = Math.max(
+              mergedWatched[String(item.index)] || 0,
+              item.save_time
+            );
+          }
+        }
+
+        mergedWatched = pruneWatchedEpisodes(mergedWatched);
+        watchedEpisodesRef.current = mergedWatched;
+        setWatchedEpisodes(mergedWatched);
+
         if (record) {
           const targetIndex = record.index - 1;
           const targetTime = record.play_time;
@@ -1204,6 +1257,18 @@ function PlayPageClient() {
     }
 
     try {
+      const now = Date.now();
+      let nextWatched = pruneWatchedEpisodes(watchedEpisodesRef.current, now);
+
+      if (shouldMarkEpisodeWatched(currentTime, duration)) {
+        nextWatched = {
+          ...nextWatched,
+          [String(currentEpisodeIndexRef.current + 1)]: now,
+        };
+        watchedEpisodesRef.current = nextWatched;
+        setWatchedEpisodes(nextWatched);
+      }
+
       await savePlayRecord(currentSourceRef.current, currentIdRef.current, {
         title: videoTitleRef.current,
         source_name: detailRef.current?.source_name || '',
@@ -1213,11 +1278,12 @@ function PlayPageClient() {
         total_episodes: detailRef.current?.episodes.length || 1,
         play_time: Math.floor(currentTime),
         total_time: Math.floor(duration),
-        save_time: Date.now(),
+        save_time: now,
         search_title: searchTitle,
+        watched_episodes: nextWatched,
       });
 
-      lastSaveTimeRef.current = Date.now();
+      lastSaveTimeRef.current = now;
       console.log('播放进度已保存:', {
         title: videoTitleRef.current,
         episode: currentEpisodeIndexRef.current + 1,
@@ -2084,6 +2150,7 @@ function PlayPageClient() {
                 sourceSearchLoading={sourceSearchLoading}
                 sourceSearchError={sourceSearchError}
                 precomputedVideoInfo={precomputedVideoInfo}
+                watchedEpisodes={watchedEpisodes}
               />
             </div>
           </div>
