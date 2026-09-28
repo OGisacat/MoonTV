@@ -71,6 +71,21 @@ function pruneWatchedEpisodes(
   );
 }
 
+function mergeWatchedEpisodes(
+  base: Record<string, number>,
+  incoming: Record<string, number> | undefined,
+  now = Date.now()
+): Record<string, number> {
+  const next = { ...base };
+  const pruned = pruneWatchedEpisodes(incoming, now);
+
+  for (const [episode, timestamp] of Object.entries(pruned)) {
+    next[episode] = Math.max(next[episode] || 0, timestamp);
+  }
+
+  return next;
+}
+
 function shouldMarkEpisodeWatched(
   currentTime: number,
   duration: number
@@ -1062,7 +1077,7 @@ function PlayPageClient() {
   }, []);
 
   // 加载并持续同步当前影片的 180 天已看集数。
-  // 兼容旧记录：如果历史记录还没有 watched_episodes，则至少恢复最后观看的一集。
+  // 同一影片不同播放源共享已看历史；旧记录也会从最后观看集数补齐。
   useEffect(() => {
     if (!currentSource || !currentId) {
       watchedEpisodesRef.current = {};
@@ -1071,30 +1086,53 @@ function PlayPageClient() {
     }
 
     const applyPlayRecords = (records: Record<string, any>) => {
-      const key = generateStorageKey(currentSource, currentId);
-      const record = records[key];
       const now = Date.now();
+      const normalizedTitle = (searchTitle || videoTitle || '')
+        .trim()
+        .toLowerCase();
+      const normalizedYear = String(videoYear || detail?.year || '').trim();
 
-      if (!record) {
-        watchedEpisodesRef.current = {};
-        setWatchedEpisodes({});
-        return;
+      let nextWatched: Record<string, number> = {};
+
+      for (const record of Object.values(records)) {
+        const recordTitle = String(
+          record?.search_title || record?.title || ''
+        )
+          .trim()
+          .toLowerCase();
+        const recordYear = String(record?.year || '').trim();
+
+        const sameTitle =
+          normalizedTitle.length > 0 && recordTitle === normalizedTitle;
+        const sameYear =
+          !normalizedYear || !recordYear || recordYear === normalizedYear;
+
+        if (!sameTitle || !sameYear) continue;
+
+        nextWatched = mergeWatchedEpisodes(
+          nextWatched,
+          record?.watched_episodes,
+          now
+        );
+
+        if (
+          record?.save_time &&
+          now - record.save_time <= WATCHED_EPISODE_RETENTION_MS &&
+          shouldMarkEpisodeWatched(
+            record.play_time || 0,
+            record.total_time || 0
+          ) &&
+          record.index >= 1
+        ) {
+          const episodeKey = String(record.index);
+          nextWatched[episodeKey] = Math.max(
+            nextWatched[episodeKey] || 0,
+            record.save_time
+          );
+        }
       }
 
-      let nextWatched = pruneWatchedEpisodes(record.watched_episodes, now);
-
-      if (
-        Object.keys(nextWatched).length === 0 &&
-        record.save_time &&
-        now - record.save_time <= WATCHED_EPISODE_RETENTION_MS &&
-        shouldMarkEpisodeWatched(record.play_time || 0, record.total_time || 0) &&
-        record.index >= 1
-      ) {
-        nextWatched = {
-          [String(record.index)]: record.save_time,
-        };
-      }
-
+      nextWatched = pruneWatchedEpisodes(nextWatched, now);
       watchedEpisodesRef.current = nextWatched;
       setWatchedEpisodes(nextWatched);
     };
@@ -1109,7 +1147,14 @@ function PlayPageClient() {
     );
 
     return unsubscribe;
-  }, [currentSource, currentId]);
+  }, [
+    currentSource,
+    currentId,
+    searchTitle,
+    videoTitle,
+    videoYear,
+    detail?.year,
+  ]);
 
   // 跳过片头片尾配置处理
   useEffect(() => {
@@ -1143,16 +1188,54 @@ function PlayPageClient() {
 
       // 记录当前播放进度（仅在同一集数切换时恢复）
       const currentPlayTime = artPlayerRef.current?.currentTime || 0;
+      const currentDuration = artPlayerRef.current?.duration || 0;
       console.log('换源前当前播放时间:', currentPlayTime);
 
-      // 清除前一个历史记录
-      if (currentSourceRef.current && currentIdRef.current) {
+      const newDetail = availableSources.find(
+        (source) => source.source === newSource && source.id === newId
+      );
+      if (!newDetail) {
+        setError('未找到匹配结果');
+        return;
+      }
+
+      // 先保存当前源，确保当前集数的已看状态已经进入共享历史。
+      await saveCurrentPlayProgress();
+
+      // 将跨来源合并后的已看历史迁移到新源，再删除旧源记录。
+      // 这样“继续观看”仍只保留一个来源，但已看集数不会因换源丢失。
+      const now = Date.now();
+      const syncedWatched = pruneWatchedEpisodes(
+        watchedEpisodesRef.current,
+        now
+      );
+
+      await savePlayRecord(newSource, newId, {
+        title: newDetail.title || newTitle,
+        source_name: newDetail.source_name || '',
+        year: newDetail.year,
+        cover: newDetail.poster || '',
+        index: currentEpisodeIndexRef.current + 1,
+        total_episodes: newDetail.episodes?.length || 1,
+        play_time: Math.floor(currentPlayTime),
+        total_time: Math.floor(currentDuration),
+        save_time: now,
+        search_title: searchTitle || newTitle,
+        watched_episodes: syncedWatched,
+      });
+
+      if (
+        currentSourceRef.current &&
+        currentIdRef.current &&
+        (currentSourceRef.current !== newSource ||
+          currentIdRef.current !== newId)
+      ) {
         try {
           await deletePlayRecord(
             currentSourceRef.current,
             currentIdRef.current
           );
-          console.log('已清除前一个播放记录');
+          console.log('已迁移并清除前一个播放记录');
         } catch (err) {
           console.error('清除播放记录失败:', err);
         }
@@ -1169,14 +1252,6 @@ function PlayPageClient() {
         } catch (err) {
           console.error('清除跳过片头片尾配置失败:', err);
         }
-      }
-
-      const newDetail = availableSources.find(
-        (source) => source.source === newSource && source.id === newId
-      );
-      if (!newDetail) {
-        setError('未找到匹配结果');
-        return;
       }
 
       // 尝试跳转到当前正在播放的集数
