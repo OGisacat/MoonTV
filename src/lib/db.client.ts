@@ -40,8 +40,6 @@ export interface PlayRecord {
   total_time: number; // 总进度（秒）
   save_time: number; // 记录保存时间（时间戳）
   search_title?: string; // 搜索时使用的标题
-  /** 180 天内看过的集数：key 为 1-based 集数，value 为最后观看时间戳 */
-  watched_episodes?: Record<string, number>;
 }
 
 // ---- 收藏类型 ----

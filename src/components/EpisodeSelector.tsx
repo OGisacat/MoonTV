@@ -42,8 +42,6 @@ interface EpisodeSelectorProps {
   sourceSearchError?: string | null;
   /** 预计算的测速结果，避免重复测速 */
   precomputedVideoInfo?: Map<string, VideoInfo>;
-  /** 180 天内看过的集数，key 为 1-based 集数 */
-  watchedEpisodes?: Record<string, number>;
 }
 
 /**
@@ -63,7 +61,6 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
   sourceSearchLoading = false,
   sourceSearchError = null,
   precomputedVideoInfo,
-  watchedEpisodes = {},
 }) => {
   const router = useRouter();
   const pageCount = Math.ceil(totalEpisodes / episodesPerPage);
@@ -452,45 +449,28 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
               return episodes;
             })().map((episodeNumber) => {
               const isActive = episodeNumber === value;
-              const isWatched = Boolean(watchedEpisodes[String(episodeNumber)]);
               return (
                 <button
                   key={episodeNumber}
                   onClick={() => handleEpisodeClick(episodeNumber - 1)}
                   className={`h-10 min-w-10 px-3 py-2 flex items-center justify-center text-sm font-medium rounded-md transition-all duration-200 whitespace-nowrap font-mono
-                    ${
-                      isActive
-                        ? 'bg-green-500 text-white shadow-lg shadow-green-500/25 dark:bg-green-600'
-                        : isWatched
-                          ? 'bg-gray-300 text-gray-500 border border-gray-400/70 hover:bg-gray-300 dark:bg-white/15 dark:text-gray-500 dark:border-white/20'
-                          : 'bg-gray-200 text-gray-700 hover:bg-gray-300 hover:scale-105 dark:bg-white/10 dark:text-gray-300 dark:hover:bg-white/20'
+                    ${isActive
+                      ? 'bg-green-500 text-white shadow-lg shadow-green-500/25 dark:bg-green-600'
+                      : 'bg-gray-200 text-gray-700 hover:bg-gray-300 hover:scale-105 dark:bg-white/10 dark:text-gray-300 dark:hover:bg-white/20'
                     }`.trim()}
                 >
-                  <span className='inline-flex items-center gap-1'>
-                    <span>
-                      {(() => {
-                        const title = episodes_titles?.[episodeNumber - 1];
-                        if (!title) {
-                          return episodeNumber;
-                        }
-                        // 如果匹配"第X集"、"第X话"、"X集"、"X话"格式，提取中间的数字
-                        const match = title.match(/(?:第)?(\d+)(?:集|话)/);
-                        if (match) {
-                          return match[1];
-                        }
-                        return title;
-                      })()}
-                    </span>
-                    {isWatched && (
-                      <span
-                        className={isActive ? 'text-white/90' : 'text-gray-500 dark:text-gray-500'}
-                        aria-label='180 天内看过'
-                        title='180 天内看过'
-                      >
-                        ✓
-                      </span>
-                    )}
-                  </span>
+                  {(() => {
+                    const title = episodes_titles?.[episodeNumber - 1];
+                    if (!title) {
+                      return episodeNumber;
+                    }
+                    // 如果匹配"第X集"、"第X话"、"X集"、"X话"格式，提取中间的数字
+                    const match = title.match(/(?:第)?(\d+)(?:集|话)/);
+                    if (match) {
+                      return match[1];
+                    }
+                    return title;
+                  })()}
                 </button>
               );
             })}
