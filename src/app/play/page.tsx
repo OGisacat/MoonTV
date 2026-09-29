@@ -31,6 +31,7 @@ import PageLayout from '@/components/PageLayout';
 declare global {
   interface HTMLVideoElement {
     hls?: any;
+    webkitShowPlaybackTargetPicker?: () => void;
   }
 }
 
@@ -40,6 +41,63 @@ interface WakeLockSentinel {
   release(): Promise<void>;
   addEventListener(type: 'release', listener: () => void): void;
   removeEventListener(type: 'release', listener: () => void): void;
+}
+
+function isIOSMobileDevice(): boolean {
+  if (typeof navigator === 'undefined') return false;
+
+  return (
+    /iPhone|iPad|iPod/i.test(navigator.userAgent) ||
+    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
+  );
+}
+
+const WATCHED_EPISODE_RETENTION_MS = 180 * 24 * 60 * 60 * 1000;
+const WATCHED_EPISODE_REFRESH_MS = 24 * 60 * 60 * 1000;
+
+function pruneWatchedEpisodes(
+  watched: Record<string, number> | undefined,
+  now = Date.now()
+): Record<string, number> {
+  if (!watched) return {};
+
+  return Object.fromEntries(
+    Object.entries(watched).filter(
+      ([, timestamp]) =>
+        Number.isFinite(timestamp) &&
+        timestamp > 0 &&
+        now - timestamp <= WATCHED_EPISODE_RETENTION_MS
+    )
+  );
+}
+
+function mergeWatchedEpisodes(
+  base: Record<string, number>,
+  incoming: Record<string, number> | undefined,
+  now = Date.now()
+): Record<string, number> {
+  const next = { ...base };
+  const pruned = pruneWatchedEpisodes(incoming, now);
+
+  for (const [episode, timestamp] of Object.entries(pruned)) {
+    next[episode] = Math.max(next[episode] || 0, timestamp);
+  }
+
+  return next;
+}
+
+function shouldMarkEpisodeWatched(
+  currentTime: number,
+  duration: number
+): boolean {
+  if (!Number.isFinite(currentTime) || !Number.isFinite(duration) || duration <= 0) {
+    return false;
+  }
+
+  // Long episodes: 60 seconds is enough to count as watched.
+  // Short clips: use 10% of duration, but never less than 5 seconds.
+  const threshold = Math.min(60, Math.max(5, duration * 0.1));
+  return currentTime >= threshold;
 }
 
 function PlayPageClient() {
@@ -121,6 +179,13 @@ function PlayPageClient() {
   }, [needPrefer]);
   // 集数相关
   const [currentEpisodeIndex, setCurrentEpisodeIndex] = useState(0);
+  const [watchedEpisodes, setWatchedEpisodes] = useState<Record<string, number>>(
+    {}
+  );
+  const watchedEpisodesRef = useRef<Record<string, number>>({});
+  useEffect(() => {
+    watchedEpisodesRef.current = watchedEpisodes;
+  }, [watchedEpisodes]);
 
   const currentSourceRef = useRef(currentSource);
   const currentIdRef = useRef(currentId);
@@ -202,6 +267,9 @@ function PlayPageClient() {
 
   const artPlayerRef = useRef<any>(null);
   const artRef = useRef<HTMLDivElement | null>(null);
+  const mobileTapTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const manualLandscapeCleanupRef = useRef<(() => void) | null>(null);
+  const manualLandscapeHideTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   // Wake Lock 相关
   const wakeLockRef = useRef<WakeLockSentinel | null>(null);
@@ -437,14 +505,66 @@ function PlayPageClient() {
       sources.forEach((s) => s.remove());
       const sourceEl = document.createElement('source');
       sourceEl.src = url;
+      if (/\.m3u8(?:$|[?#])/i.test(url)) {
+        sourceEl.type = 'application/vnd.apple.mpegurl';
+      }
       video.appendChild(sourceEl);
     }
 
     // 始终允许远程播放（AirPlay / Cast）
     video.disableRemotePlayback = false;
+    video.setAttribute('x-webkit-airplay', 'allow');
     // 如果曾经有禁用属性，移除之
     if (video.hasAttribute('disableRemotePlayback')) {
       video.removeAttribute('disableRemotePlayback');
+    }
+  };
+
+  const showTVCastPicker = async () => {
+    const player = artPlayerRef.current;
+    const video = player?.video as
+      | (HTMLVideoElement & {
+          remote?: {
+            state?: string;
+            prompt?: () => Promise<void>;
+          };
+        })
+      | undefined;
+
+    if (!player || !video) return;
+
+    ensureVideoSource(video, videoUrl);
+
+    try {
+      // Safari / iPhone / iPad: use the native AirPlay target picker.
+      if (typeof video.webkitShowPlaybackTargetPicker === 'function') {
+        video.webkitShowPlaybackTargetPicker();
+        return;
+      }
+
+      // Chromium / browsers implementing Remote Playback can expose TV targets
+      // through the browser's native picker.
+      if (video.remote && typeof video.remote.prompt === 'function') {
+        await video.remote.prompt();
+        if (video.remote.state === 'connected') {
+          player.notice.show = '已连接到 TV';
+        }
+        return;
+      }
+
+      player.notice.show =
+        '当前浏览器不支持 TV 投屏；iPhone 请使用 Safari / AirPlay';
+    } catch (err) {
+      const errorName = err instanceof DOMException ? err.name : '';
+      if (errorName === 'AbortError') return;
+
+      if (errorName === 'NotFoundError') {
+        player.notice.show = '未发现可投屏设备';
+        return;
+      }
+
+      console.warn('TV 投屏失败:', err);
+      player.notice.show = '投屏失败，请确认手机和电视在同一网络';
     }
   };
 
@@ -474,8 +594,132 @@ function PlayPageClient() {
     }
   };
 
+  const setIOSManualLandscape = (enabled: boolean) => {
+    if (typeof window === 'undefined' || typeof document === 'undefined') {
+      return;
+    }
+
+    const player = artRef.current;
+    if (!player) return;
+
+    manualLandscapeCleanupRef.current?.();
+    manualLandscapeCleanupRef.current = null;
+
+    if (manualLandscapeHideTimerRef.current) {
+      clearTimeout(manualLandscapeHideTimerRef.current);
+      manualLandscapeHideTimerRef.current = null;
+    }
+
+    const html = document.documentElement;
+    const body = document.body;
+    const themeSelector = 'meta[data-ios-manual-landscape-theme-color]';
+
+    if (!enabled) {
+      player.classList.remove('ios-manual-landscape-player');
+      html.classList.remove('ios-manual-landscape-page');
+      body.classList.remove('ios-manual-landscape-page');
+
+      for (const property of ['top', 'left', 'width', 'height']) {
+        player.style.removeProperty(property);
+      }
+
+      document.querySelector(themeSelector)?.remove();
+
+      if (artPlayerRef.current) {
+        // ArtPlayer uses isRotate to map mobile progress dragging to the
+        // vertical touch axis after a 90-degree rotation.
+        artPlayerRef.current.isRotate = false;
+      }
+
+      requestAnimationFrame(() => {
+        try {
+          artPlayerRef.current?.emit('resize');
+        } catch {
+          // ignore
+        }
+      });
+      return;
+    }
+
+    player.classList.add('ios-manual-landscape-player');
+    html.classList.add('ios-manual-landscape-page');
+    body.classList.add('ios-manual-landscape-page');
+
+    if (artPlayerRef.current) {
+      artPlayerRef.current.isRotate = true;
+    }
+
+    let themeMeta = document.querySelector(
+      themeSelector
+    ) as HTMLMetaElement | null;
+    if (!themeMeta) {
+      themeMeta = document.createElement('meta');
+      themeMeta.name = 'theme-color';
+      themeMeta.dataset.iosManualLandscapeThemeColor = 'true';
+      document.head.appendChild(themeMeta);
+    }
+    themeMeta.content = '#000000';
+
+    const updateLayout = () => {
+      const viewport = window.visualViewport;
+      const visibleWidth = viewport?.width ?? window.innerWidth;
+      const visibleHeight = viewport?.height ?? window.innerHeight;
+      const offsetLeft = viewport?.offsetLeft ?? 0;
+      const offsetTop = viewport?.offsetTop ?? 0;
+
+      player.style.left = `${offsetLeft + visibleWidth / 2}px`;
+      player.style.top = `${offsetTop + visibleHeight / 2}px`;
+      player.style.width = `${visibleHeight}px`;
+      player.style.height = `${visibleWidth}px`;
+
+      try {
+        artPlayerRef.current?.emit('resize');
+      } catch {
+        // ignore
+      }
+    };
+
+    updateLayout();
+
+    const visualViewport = window.visualViewport;
+    visualViewport?.addEventListener('resize', updateLayout);
+    visualViewport?.addEventListener('scroll', updateLayout);
+    window.addEventListener('resize', updateLayout);
+
+    manualLandscapeCleanupRef.current = () => {
+      visualViewport?.removeEventListener('resize', updateLayout);
+      visualViewport?.removeEventListener('scroll', updateLayout);
+      window.removeEventListener('resize', updateLayout);
+    };
+
+    // Hide controls after entering manual landscape; tapping the video brings
+    // them back normally.
+    manualLandscapeHideTimerRef.current = setTimeout(() => {
+      try {
+        if (
+          artRef.current?.classList.contains(
+            'ios-manual-landscape-player'
+          ) &&
+          artPlayerRef.current &&
+          !artPlayerRef.current.paused
+        ) {
+          artPlayerRef.current.controls.show = false;
+        }
+      } catch {
+        // ignore
+      }
+    }, 1400);
+  };
+
   // 清理播放器资源的统一函数
   const cleanupPlayer = () => {
+    setIOSManualLandscape(false);
+
+    if (mobileTapTimerRef.current) {
+      clearTimeout(mobileTapTimerRef.current);
+      mobileTapTimerRef.current = null;
+    }
+
     if (artPlayerRef.current) {
       try {
         // 销毁 HLS 实例
@@ -832,6 +1076,86 @@ function PlayPageClient() {
     initFromHistory();
   }, []);
 
+  // 加载并持续同步当前影片的 180 天已看集数。
+  // 同一影片不同播放源共享已看历史；旧记录也会从最后观看集数补齐。
+  useEffect(() => {
+    if (!currentSource || !currentId) {
+      watchedEpisodesRef.current = {};
+      setWatchedEpisodes({});
+      return;
+    }
+
+    const applyPlayRecords = (records: Record<string, any>) => {
+      const now = Date.now();
+      const normalizedTitle = (searchTitle || videoTitle || '')
+        .trim()
+        .toLowerCase();
+      const normalizedYear = String(videoYear || detail?.year || '').trim();
+
+      let nextWatched: Record<string, number> = {};
+
+      for (const record of Object.values(records)) {
+        const recordTitle = String(
+          record?.search_title || record?.title || ''
+        )
+          .trim()
+          .toLowerCase();
+        const recordYear = String(record?.year || '').trim();
+
+        const sameTitle =
+          normalizedTitle.length > 0 && recordTitle === normalizedTitle;
+        const sameYear =
+          !normalizedYear || !recordYear || recordYear === normalizedYear;
+
+        if (!sameTitle || !sameYear) continue;
+
+        nextWatched = mergeWatchedEpisodes(
+          nextWatched,
+          record?.watched_episodes,
+          now
+        );
+
+        if (
+          record?.save_time &&
+          now - record.save_time <= WATCHED_EPISODE_RETENTION_MS &&
+          shouldMarkEpisodeWatched(
+            record.play_time || 0,
+            record.total_time || 0
+          ) &&
+          record.index >= 1
+        ) {
+          const episodeKey = String(record.index);
+          nextWatched[episodeKey] = Math.max(
+            nextWatched[episodeKey] || 0,
+            record.save_time
+          );
+        }
+      }
+
+      nextWatched = pruneWatchedEpisodes(nextWatched, now);
+      watchedEpisodesRef.current = nextWatched;
+      setWatchedEpisodes(nextWatched);
+    };
+
+    getAllPlayRecords()
+      .then(applyPlayRecords)
+      .catch((err) => console.warn('读取已看集数失败:', err));
+
+    const unsubscribe = subscribeToDataUpdates(
+      'playRecordsUpdated',
+      applyPlayRecords
+    );
+
+    return unsubscribe;
+  }, [
+    currentSource,
+    currentId,
+    searchTitle,
+    videoTitle,
+    videoYear,
+    detail?.year,
+  ]);
+
   // 跳过片头片尾配置处理
   useEffect(() => {
     // 仅在初次挂载时检查跳过片头片尾配置
@@ -864,16 +1188,54 @@ function PlayPageClient() {
 
       // 记录当前播放进度（仅在同一集数切换时恢复）
       const currentPlayTime = artPlayerRef.current?.currentTime || 0;
+      const currentDuration = artPlayerRef.current?.duration || 0;
       console.log('换源前当前播放时间:', currentPlayTime);
 
-      // 清除前一个历史记录
-      if (currentSourceRef.current && currentIdRef.current) {
+      const newDetail = availableSources.find(
+        (source) => source.source === newSource && source.id === newId
+      );
+      if (!newDetail) {
+        setError('未找到匹配结果');
+        return;
+      }
+
+      // 先保存当前源，确保当前集数的已看状态已经进入共享历史。
+      await saveCurrentPlayProgress();
+
+      // 将跨来源合并后的已看历史迁移到新源，再删除旧源记录。
+      // 这样“继续观看”仍只保留一个来源，但已看集数不会因换源丢失。
+      const now = Date.now();
+      const syncedWatched = pruneWatchedEpisodes(
+        watchedEpisodesRef.current,
+        now
+      );
+
+      await savePlayRecord(newSource, newId, {
+        title: newDetail.title || newTitle,
+        source_name: newDetail.source_name || '',
+        year: newDetail.year,
+        cover: newDetail.poster || '',
+        index: currentEpisodeIndexRef.current + 1,
+        total_episodes: newDetail.episodes?.length || 1,
+        play_time: Math.floor(currentPlayTime),
+        total_time: Math.floor(currentDuration),
+        save_time: now,
+        search_title: searchTitle || newTitle,
+        watched_episodes: syncedWatched,
+      });
+
+      if (
+        currentSourceRef.current &&
+        currentIdRef.current &&
+        (currentSourceRef.current !== newSource ||
+          currentIdRef.current !== newId)
+      ) {
         try {
           await deletePlayRecord(
             currentSourceRef.current,
             currentIdRef.current
           );
-          console.log('已清除前一个播放记录');
+          console.log('已迁移并清除前一个播放记录');
         } catch (err) {
           console.error('清除播放记录失败:', err);
         }
@@ -890,14 +1252,6 @@ function PlayPageClient() {
         } catch (err) {
           console.error('清除跳过片头片尾配置失败:', err);
         }
-      }
-
-      const newDetail = availableSources.find(
-        (source) => source.source === newSource && source.id === newId
-      );
-      if (!newDetail) {
-        setError('未找到匹配结果');
-        return;
       }
 
       // 尝试跳转到当前正在播放的集数
@@ -1098,6 +1452,29 @@ function PlayPageClient() {
     }
 
     try {
+      const now = Date.now();
+      let nextWatched = pruneWatchedEpisodes(watchedEpisodesRef.current, now);
+      const episodeKey = String(currentEpisodeIndexRef.current + 1);
+      const previousWatchedAt = nextWatched[episodeKey] || 0;
+
+      if (
+        shouldMarkEpisodeWatched(currentTime, duration) &&
+        now - previousWatchedAt >= WATCHED_EPISODE_REFRESH_MS
+      ) {
+        nextWatched = {
+          ...nextWatched,
+          [episodeKey]: now,
+        };
+      }
+
+      if (
+        JSON.stringify(nextWatched) !==
+        JSON.stringify(watchedEpisodesRef.current)
+      ) {
+        watchedEpisodesRef.current = nextWatched;
+        setWatchedEpisodes(nextWatched);
+      }
+
       await savePlayRecord(currentSourceRef.current, currentIdRef.current, {
         title: videoTitleRef.current,
         source_name: detailRef.current?.source_name || '',
@@ -1107,11 +1484,12 @@ function PlayPageClient() {
         total_episodes: detailRef.current?.episodes.length || 1,
         play_time: Math.floor(currentTime),
         total_time: Math.floor(duration),
-        save_time: Date.now(),
+        save_time: now,
         search_title: searchTitle,
+        watched_episodes: nextWatched,
       });
 
-      lastSaveTimeRef.current = Date.now();
+      lastSaveTimeRef.current = now;
       console.log('播放进度已保存:', {
         title: videoTitleRef.current,
         episode: currentEpisodeIndexRef.current + 1,
@@ -1289,6 +1667,21 @@ function PlayPageClient() {
       Artplayer.USE_RAF = false;
       Artplayer.FULLSCREEN_WEB_IN_BODY = true;
 
+      const isMobileDevice =
+        /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
+          navigator.userAgent
+        ) ||
+        (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+      const isIOSMobile = isIOSMobileDevice();
+
+      // ArtPlayer toggles play/pause immediately on the first tap. Disable its
+      // mobile click handlers so we can defer a single tap briefly and let a
+      // second tap turn the gesture into "+10 seconds" without a pause flash.
+      if (isMobileDevice) {
+        Artplayer.MOBILE_CLICK_PLAY = false;
+        Artplayer.MOBILE_DBCLICK_PLAY = false;
+      }
+
       artPlayerRef.current = new Artplayer({
         container: artRef.current,
         url: videoUrl,
@@ -1317,7 +1710,7 @@ function PlayPageClient() {
         theme: '#22c55e',
         lang: 'zh-cn',
         hotkey: false,
-        fastForward: true,
+        fastForward: false,
         autoOrientation: true,
         lock: true,
         moreVideoAttr: {
@@ -1399,6 +1792,7 @@ function PlayPageClient() {
                   ) {
                     artPlayerRef.current.video.hls.destroy();
                   }
+                  setIOSManualLandscape(false);
                   artPlayerRef.current.destroy();
                   artPlayerRef.current = null;
                 }
@@ -1481,6 +1875,16 @@ function PlayPageClient() {
         // 控制栏配置
         controls: [
           {
+            name: 'tv-cast',
+            position: 'right',
+            index: 50,
+            html: '<i class="art-icon flex"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M3 18h3v3H3v-3Zm0-5a8 8 0 0 1 8 8H8a5 5 0 0 0-5-5v-3Zm0-5c7.18 0 13 5.82 13 13h-3C13 15.48 8.52 11 3 11V8Zm3-5h13a2 2 0 0 1 2 2v11h-3V6H6V3Z" fill="currentColor"/></svg></i>',
+            tooltip: 'TV 投屏',
+            click: function () {
+              void showTVCastPicker();
+            },
+          },
+          {
             position: 'left',
             index: 13,
             html: '<i class="art-icon flex"><svg width="22" height="22" viewBox="0 0 22 22" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z" fill="currentColor"/></svg></i>',
@@ -1489,8 +1893,63 @@ function PlayPageClient() {
               handleNextEpisode();
             },
           },
+          ...(isIOSMobile
+            ? [
+                {
+                  name: 'ios-manual-landscape',
+                  position: 'right' as const,
+                  index: 65,
+                  html: '<i class="art-icon flex"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M4 8V4h4M20 16v4h-4M5.5 18.5A8 8 0 0 1 18.5 5.5M18.5 5.5H14.5M18.5 5.5V9.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></i>',
+                  tooltip: '手动横屏',
+                  click: function () {
+                    const enabled =
+                      !artRef.current?.classList.contains(
+                        'ios-manual-landscape-player'
+                      );
+                    setIOSManualLandscape(enabled);
+                    return enabled ? '退出横屏' : '手动横屏';
+                  },
+                },
+              ]
+            : []),
         ],
       });
+
+      if (isMobileDevice) {
+        artPlayerRef.current.on('click', () => {
+          if (mobileTapTimerRef.current) {
+            clearTimeout(mobileTapTimerRef.current);
+          }
+
+          const tapDelay = Math.max(250, Artplayer.DBCLICK_TIME || 300) + 20;
+          mobileTapTimerRef.current = setTimeout(() => {
+            const player = artPlayerRef.current;
+            if (player?.paused) {
+              player.play();
+            }
+            mobileTapTimerRef.current = null;
+          }, tapDelay);
+        });
+
+        artPlayerRef.current.on('dblclick', () => {
+          if (mobileTapTimerRef.current) {
+            clearTimeout(mobileTapTimerRef.current);
+            mobileTapTimerRef.current = null;
+          }
+
+          const player = artPlayerRef.current;
+          if (!player) return;
+
+          const currentTime = player.currentTime || 0;
+          const duration = player.duration || 0;
+          const targetTime = duration
+            ? Math.min(currentTime + 10, duration)
+            : currentTime + 10;
+
+          player.currentTime = targetTime;
+          player.notice.show = '快进 10 秒';
+        });
+      }
 
       // 监听播放器事件
       artPlayerRef.current.on('ready', () => {
@@ -1956,6 +2415,7 @@ function PlayPageClient() {
                 sourceSearchLoading={sourceSearchLoading}
                 sourceSearchError={sourceSearchError}
                 precomputedVideoInfo={precomputedVideoInfo}
+                watchedEpisodes={watchedEpisodes}
               />
             </div>
           </div>

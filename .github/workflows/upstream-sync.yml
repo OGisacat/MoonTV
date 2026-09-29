@@ -21,49 +21,65 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Sync MoonTechLab/LunaTV and preserve branding
+      - name: Apply upstream changes without overwriting local customizations
         shell: bash
         run: |
           set -euo pipefail
 
-          git remote add upstream https://github.com/MoonTechLab/LunaTV.git 2>/dev/null ||             git remote set-url upstream https://github.com/MoonTechLab/LunaTV.git
+          git remote add upstream https://github.com/MoonTechLab/LunaTV.git 2>/dev/null || \
+            git remote set-url upstream https://github.com/MoonTechLab/LunaTV.git
           git fetch --no-tags upstream main
 
-          preserve_dir="$(mktemp -d)"
-          mkdir -p "$preserve_dir/public/icons" "$preserve_dir/.github/workflows"
+          base_file=".github/upstream-base-sha"
+          if [[ ! -f "$base_file" ]]; then
+            echo "::error::Missing $base_file; refusing to sync without a known upstream base."
+            exit 1
+          fi
 
-          cp public/favicon.ico "$preserve_dir/public/favicon.ico"
-          cp public/logo.png "$preserve_dir/public/logo.png"
-          cp public/icons/icon-192x192.png "$preserve_dir/public/icons/icon-192x192.png"
-          cp public/icons/icon-256x256.png "$preserve_dir/public/icons/icon-256x256.png"
-          cp public/icons/icon-384x384.png "$preserve_dir/public/icons/icon-384x384.png"
-          cp public/icons/icon-512x512.png "$preserve_dir/public/icons/icon-512x512.png"
-          cp .github/workflows/upstream-sync.yml "$preserve_dir/.github/workflows/upstream-sync.yml"
-          cp .github/workflows/ci.yml "$preserve_dir/.github/workflows/ci.yml"
-          cp .github/workflows/docker-image.yml "$preserve_dir/.github/workflows/docker-image.yml"
+          base_sha="$(tr -d '[:space:]' < "$base_file")"
+          upstream_sha="$(git rev-parse upstream/main)"
 
-          git rm -r --ignore-unmatch .
-          git checkout upstream/main -- .
+          if [[ "$base_sha" == "$upstream_sha" ]]; then
+            echo "Already up to date with upstream ${upstream_sha:0:7}."
+            exit 0
+          fi
 
-          mkdir -p public/icons .github/workflows
-          cp "$preserve_dir/public/favicon.ico" public/favicon.ico
-          cp "$preserve_dir/public/logo.png" public/logo.png
-          cp "$preserve_dir/public/icons/icon-192x192.png" public/icons/icon-192x192.png
-          cp "$preserve_dir/public/icons/icon-256x256.png" public/icons/icon-256x256.png
-          cp "$preserve_dir/public/icons/icon-384x384.png" public/icons/icon-384x384.png
-          cp "$preserve_dir/public/icons/icon-512x512.png" public/icons/icon-512x512.png
-          cp "$preserve_dir/.github/workflows/upstream-sync.yml" .github/workflows/upstream-sync.yml
-          cp "$preserve_dir/.github/workflows/ci.yml" .github/workflows/ci.yml
-          cp "$preserve_dir/.github/workflows/docker-image.yml" .github/workflows/docker-image.yml
+          if ! git cat-file -e "${base_sha}^{commit}" 2>/dev/null; then
+            echo "::error::Stored upstream base $base_sha is unavailable; refusing to overwrite local changes."
+            exit 1
+          fi
 
+          patch_file="$(mktemp)"
+          git diff --binary --full-index "$base_sha" "$upstream_sha" -- \
+            . \
+            ':(exclude)public/favicon.ico' \
+            ':(exclude)public/logo.png' \
+            ':(exclude)public/icons/icon-192x192.png' \
+            ':(exclude)public/icons/icon-256x256.png' \
+            ':(exclude)public/icons/icon-384x384.png' \
+            ':(exclude)public/icons/icon-512x512.png' \
+            ':(exclude).github/workflows/upstream-sync.yml' \
+            ':(exclude).github/workflows/ci.yml' \
+            ':(exclude).github/workflows/docker-image.yml' \
+            > "$patch_file"
+
+          if [[ -s "$patch_file" ]]; then
+            if ! git apply --3way --index "$patch_file"; then
+              echo "::error::Upstream changes conflict with MoonTV customizations. Nothing was pushed."
+              git status --short
+              exit 1
+            fi
+          fi
+
+          printf '%s\n' "$upstream_sha" > "$base_file"
           git add -A
+
           if git diff --cached --quiet; then
-            echo "Already up to date."
+            echo "No applicable upstream changes."
             exit 0
           fi
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          upstream_sha="$(git rev-parse --short upstream/main)"
-          git commit -m "chore: sync MoonTechLab/LunaTV ${upstream_sha}"
+          git commit -m "chore: sync MoonTechLab/LunaTV ${upstream_sha:0:7}"
           git push origin HEAD:main
