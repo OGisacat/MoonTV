@@ -1,0 +1,68 @@
+diff --git a/src/app/play/page.tsx b/src/app/play/page.tsx
+--- a/src/app/play/page.tsx
++++ b/src/app/play/page.tsx
+@@ -499,17 +499,59 @@ function PlayPageClient() {
+   function filterAdsFromM3U8(m3u8Content: string): string {
+     if (!m3u8Content) return '';
+ 
+-    // 按行分割M3U8内容
+     const lines = m3u8Content.split('\n');
+-    const filteredLines = [];
++    const filteredLines: string[] = [];
++    let inAdBreak = false;
++
++    // Keep this deliberately conservative. Broad matches such as "ad" can
++    // accidentally remove legitimate segment URLs (for example "download").
++    const adSegmentPattern =
++      /(?:^|[\\/_\-.])(ads?|advert(?:isement)?|sponsor|promo|adjump|redtraffic)(?:[\\/_\-.]|$)/i;
+ 
+     for (let i = 0; i < lines.length; i++) {
+       const line = lines[i];
++      const trimmed = line.trim();
++
++      // Standard HLS cue markers used for server-side inserted ad breaks.
++      if (
++        trimmed.startsWith('#EXT-X-CUE-OUT') ||
++        trimmed.startsWith('#EXT-X-CUE-OUT-CONT')
++      ) {
++        inAdBreak = true;
++        continue;
++      }
++
++      if (trimmed.startsWith('#EXT-X-CUE-IN')) {
++        inAdBreak = false;
++        continue;
++      }
++
++      if (inAdBreak) {
++        continue;
++      }
++
++      // For ordinary EXTINF segments, only drop the segment when its URI
++      // clearly looks like an ad asset. Preserve discontinuity markers:
++      // they are valid HLS timeline boundaries and are not ads by themselves.
++      if (trimmed.startsWith('#EXTINF')) {
++        let uriIndex = i + 1;
++        while (
++          uriIndex < lines.length &&
++          lines[uriIndex].trim().startsWith('#')
++        ) {
++          uriIndex++;
++        }
+ 
+-      // 只过滤#EXT-X-DISCONTINUITY标识
+-      if (!line.includes('#EXT-X-DISCONTINUITY')) {
+-        filteredLines.push(line);
++        if (
++          uriIndex < lines.length &&
++          adSegmentPattern.test(lines[uriIndex].trim())
++        ) {
++          i = uriIndex;
++          continue;
++        }
+       }
++
++      filteredLines.push(line);
+     }
+ 
+     return filteredLines.join('\n');
