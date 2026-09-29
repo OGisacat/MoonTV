@@ -463,27 +463,33 @@ async function fetchWithAuth(
   url: string,
   options?: RequestInit
 ): Promise<Response> {
-  const res = await fetch(url, options);
-  if (!res.ok) {
-    // 如果是 401 未授权，跳转到登录页面
+  let res = await fetch(url, options);
+
+  if (res.status === 401) {
+    // 部署切换或实例抖动时偶尔会出现瞬时 401。
+    // 先重试一次，避免一次异常就清掉本来有效的登录态。
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    res = await fetch(url, options);
+
     if (res.status === 401) {
-      // 调用 logout 接口
-      try {
-        await fetch('/api/logout', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-        });
-      } catch (error) {
-        console.error('注销请求失败:', error);
-      }
+      console.warn(`认证连续失败，跳转登录页: ${url}`);
+
       const currentUrl = window.location.pathname + window.location.search;
       const loginUrl = new URL('/login', window.location.origin);
       loginUrl.searchParams.set('redirect', currentUrl);
+      loginUrl.searchParams.set('reason', 'auth');
       window.location.href = loginUrl.toString();
-      throw new Error('用户未授权，已跳转到登录页面');
+
+      // 不主动调用 /api/logout 清 Cookie。
+      // 登录页重新登录时会覆盖旧 Cookie，避免偶发 401 永久破坏有效会话。
+      throw new Error(`用户未授权（${url} 连续返回 401），已跳转到登录页面`);
     }
+  }
+
+  if (!res.ok) {
     throw new Error(`请求 ${url} 失败: ${res.status}`);
   }
+
   return res;
 }
 
