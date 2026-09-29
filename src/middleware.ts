@@ -20,17 +20,22 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(warningUrl);
   }
 
-  // 从cookie获取认证信息
+  // 从 cookie 获取认证信息。保留“没有 cookie”和“cookie 无法解析”的区别用于诊断。
+  const rawAuthCookie = request.cookies.get('auth');
   const authInfo = getAuthInfoFromCookie(request);
 
   if (!authInfo) {
-    return handleAuthFailure(request, pathname);
+    return handleAuthFailure(
+      request,
+      pathname,
+      rawAuthCookie ? 'invalid_auth_cookie' : 'missing_auth_cookie'
+    );
   }
 
   // localstorage模式：在middleware中完成验证
   if (storageType === 'localstorage') {
     if (!authInfo.password || authInfo.password !== process.env.PASSWORD) {
-      return handleAuthFailure(request, pathname);
+      return handleAuthFailure(request, pathname, 'invalid_local_auth');
     }
     return NextResponse.next();
   }
@@ -38,7 +43,7 @@ export async function middleware(request: NextRequest) {
   // 其他模式：只验证签名
   // 检查是否有用户名（非localStorage模式下密码不存储在cookie中）
   if (!authInfo.username || !authInfo.signature) {
-    return handleAuthFailure(request, pathname);
+    return handleAuthFailure(request, pathname, 'missing_identity');
   }
 
   // 验证签名（如果存在）
@@ -56,7 +61,7 @@ export async function middleware(request: NextRequest) {
   }
 
   // 签名验证失败或不存在签名
-  return handleAuthFailure(request, pathname);
+  return handleAuthFailure(request, pathname, 'invalid_signature');
 }
 
 // 验证签名
@@ -100,11 +105,17 @@ async function verifySignature(
 // 处理认证失败的情况
 function handleAuthFailure(
   request: NextRequest,
-  pathname: string
+  pathname: string,
+  reason: string
 ): NextResponse {
-  // 如果是 API 路由，返回 401 状态码
+  // 如果是 API 路由，返回 401，并带上不含敏感信息的诊断原因。
   if (pathname.startsWith('/api')) {
-    return new NextResponse('Unauthorized', { status: 401 });
+    return new NextResponse('Unauthorized', {
+      status: 401,
+      headers: {
+        'X-Auth-Failure-Reason': reason,
+      },
+    });
   }
 
   // 否则重定向到登录页面
@@ -112,6 +123,7 @@ function handleAuthFailure(
   // 保留完整的URL，包括查询参数
   const fullUrl = `${pathname}${request.nextUrl.search}`;
   loginUrl.searchParams.set('redirect', fullUrl);
+  loginUrl.searchParams.set('reason', reason);
   return NextResponse.redirect(loginUrl);
 }
 

@@ -456,6 +456,31 @@ if (typeof window !== 'undefined') {
 }
 
 // ---- 工具函数 ----
+const AUTH_DEBUG_LOG_KEY = 'moontv_auth_debug_logs';
+
+function appendAuthDebugLog(entry: Record<string, unknown>) {
+  if (typeof window === 'undefined') return;
+
+  try {
+    const existing = JSON.parse(
+      localStorage.getItem(AUTH_DEBUG_LOG_KEY) || '[]'
+    );
+    const logs = Array.isArray(existing) ? existing : [];
+
+    logs.unshift({
+      time: new Date().toISOString(),
+      ...entry,
+    });
+
+    localStorage.setItem(
+      AUTH_DEBUG_LOG_KEY,
+      JSON.stringify(logs.slice(0, 8))
+    );
+  } catch (error) {
+    console.warn('写入认证诊断日志失败:', error);
+  }
+}
+
 /**
  * 通用的 fetch 函数，处理 401 状态码自动跳转登录
  */
@@ -466,18 +491,37 @@ async function fetchWithAuth(
   let res = await fetch(url, options);
 
   if (res.status === 401) {
+    const firstReason =
+      res.headers.get('x-auth-failure-reason') || 'unknown';
+
     // 部署切换或实例抖动时偶尔会出现瞬时 401。
     // 先重试一次，避免一次异常就清掉本来有效的登录态。
     await new Promise((resolve) => setTimeout(resolve, 300));
     res = await fetch(url, options);
 
     if (res.status === 401) {
-      console.warn(`认证连续失败，跳转登录页: ${url}`);
+      const retryReason =
+        res.headers.get('x-auth-failure-reason') || 'unknown';
+
+      appendAuthDebugLog({
+        type: 'api_401_twice',
+        endpoint: url,
+        firstReason,
+        retryReason,
+        page: window.location.pathname + window.location.search,
+        online: navigator.onLine,
+        visibility: document.visibilityState,
+        storageType: STORAGE_TYPE,
+      });
+
+      console.warn(
+        `认证连续失败，跳转登录页: ${url} (${firstReason} -> ${retryReason})`
+      );
 
       const currentUrl = window.location.pathname + window.location.search;
       const loginUrl = new URL('/login', window.location.origin);
       loginUrl.searchParams.set('redirect', currentUrl);
-      loginUrl.searchParams.set('reason', 'auth');
+      loginUrl.searchParams.set('reason', 'api_401_twice');
       window.location.href = loginUrl.toString();
 
       // 不主动调用 /api/logout 清 Cookie。

@@ -2,7 +2,7 @@
 
 'use client';
 
-import { AlertCircle, CheckCircle } from 'lucide-react';
+import { AlertCircle, CheckCircle, Copy, Trash2 } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useEffect, useState } from 'react';
 
@@ -85,16 +85,48 @@ function LoginPageClient() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [shouldAskUsername, setShouldAskUsername] = useState(false);
+  const [authDebugText, setAuthDebugText] = useState('');
+  const [copiedDebug, setCopiedDebug] = useState(false);
 
   const { siteName } = useSite();
 
-  // 在客户端挂载后设置配置
+  // 在客户端挂载后设置配置，并读取最近的认证诊断日志。
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const storageType = (window as any).RUNTIME_CONFIG?.STORAGE_TYPE;
       setShouldAskUsername(storageType && storageType !== 'localstorage');
+
+      try {
+        const reason = searchParams.get('reason');
+        const redirect = searchParams.get('redirect');
+        const stored = JSON.parse(
+          localStorage.getItem('moontv_auth_debug_logs') || '[]'
+        );
+        const logs = Array.isArray(stored) ? stored : [];
+
+        if (reason || logs.length > 0) {
+          setAuthDebugText(
+            JSON.stringify(
+              {
+                generatedAt: new Date().toISOString(),
+                loginReason: reason || null,
+                redirect: redirect || null,
+                storageType: storageType || 'unknown',
+                online: navigator.onLine,
+                visibility: document.visibilityState,
+                userAgent: navigator.userAgent,
+                recentAuthLogs: logs.slice(0, 8),
+              },
+              null,
+              2
+            )
+          );
+        }
+      } catch (debugError) {
+        console.warn('读取认证诊断日志失败:', debugError);
+      }
     }
-  }, []);
+  }, [searchParams]);
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -129,7 +161,7 @@ function LoginPageClient() {
 
 
   return (
-    <div className='relative min-h-screen flex items-center justify-center px-4 overflow-hidden'>
+    <div className='relative min-h-screen flex items-center justify-center px-4 py-8 overflow-y-auto'>
       <div className='absolute top-4 right-4'>
         <ThemeToggle />
       </div>
@@ -185,6 +217,49 @@ function LoginPageClient() {
             {loading ? '登录中...' : '登录'}
           </button>
         </form>
+
+        {authDebugText && (
+          <details className='mt-6 rounded-xl border border-amber-200 bg-amber-50/80 p-3 text-xs dark:border-amber-900/60 dark:bg-amber-950/20'>
+            <summary className='cursor-pointer font-semibold text-amber-800 dark:text-amber-300'>
+              认证诊断日志
+            </summary>
+            <p className='mt-2 text-[11px] leading-5 text-amber-700/80 dark:text-amber-300/80'>
+              不包含密码、Cookie 或签名。异常退出后可直接复制给开发者排查。
+            </p>
+            <pre className='mt-2 max-h-44 overflow-auto whitespace-pre-wrap break-all rounded-lg bg-black/5 p-2 font-mono text-[10px] leading-4 text-gray-700 dark:bg-white/5 dark:text-gray-300'>
+              {authDebugText}
+            </pre>
+            <div className='mt-2 flex gap-2'>
+              <button
+                type='button'
+                onClick={async () => {
+                  try {
+                    await navigator.clipboard.writeText(authDebugText);
+                    setCopiedDebug(true);
+                    setTimeout(() => setCopiedDebug(false), 1500);
+                  } catch {
+                    setCopiedDebug(false);
+                  }
+                }}
+                className='inline-flex items-center gap-1 rounded-md border border-amber-300 px-2 py-1 font-medium text-amber-800 hover:bg-amber-100 dark:border-amber-800 dark:text-amber-300 dark:hover:bg-amber-950/50'
+              >
+                <Copy className='h-3.5 w-3.5' />
+                {copiedDebug ? '已复制' : '复制日志'}
+              </button>
+              <button
+                type='button'
+                onClick={() => {
+                  localStorage.removeItem('moontv_auth_debug_logs');
+                  setAuthDebugText('');
+                }}
+                className='inline-flex items-center gap-1 rounded-md px-2 py-1 text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800'
+              >
+                <Trash2 className='h-3.5 w-3.5' />
+                清除
+              </button>
+            </div>
+          </details>
+        )}
       </div>
 
       {/* 版本信息显示 */}
