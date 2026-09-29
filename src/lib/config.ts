@@ -3,6 +3,11 @@
 import { db } from '@/lib/db';
 
 import { AdminConfig } from './admin.types';
+import {
+  CURATED_SOURCE_ADDITIONS,
+  decorateCuratedSourceName,
+  getSourceHost,
+} from './curated-sources';
 
 export interface ApiSite {
   key: string;
@@ -327,10 +332,37 @@ export async function getConfig(): Promise<AdminConfig> {
       adminConfig = await getInitConfig("");
     }
     adminConfig = configSelfCheck(adminConfig);
+
+    // MoonTV 自定义精选源：只补缺失项，不覆盖用户已有的同 key / 同域名配置。
+    let addedCuratedSources = false;
+    const existingKeys = new Set(adminConfig.SourceConfig.map((s) => s.key));
+    const existingHosts = new Set(
+      adminConfig.SourceConfig.map((s) => getSourceHost(s.api)).filter(Boolean)
+    );
+
+    for (const source of CURATED_SOURCE_ADDITIONS) {
+      const sourceHost = getSourceHost(source.api);
+      if (
+        existingKeys.has(source.key) ||
+        (sourceHost && existingHosts.has(sourceHost))
+      ) {
+        continue;
+      }
+
+      adminConfig.SourceConfig.push({
+        ...source,
+        from: 'custom',
+        disabled: false,
+      });
+      existingKeys.add(source.key);
+      if (sourceHost) existingHosts.add(sourceHost);
+      addedCuratedSources = true;
+    }
+
     cachedConfig = adminConfig;
     cachedConfigAt = Date.now();
-    // 仅在首次初始化时回写，避免每次缓存过期都产生一次写库
-    if (needInit) {
+    // 首次初始化或补入精选源时回写；普通缓存刷新不产生额外写入。
+    if (needInit || addedCuratedSources) {
       try {
         await db.saveAdminConfig(cachedConfig);
       } catch (e) {
@@ -451,7 +483,10 @@ export async function getCacheTime(): Promise<number> {
 
 export async function getAvailableApiSites(user?: string): Promise<ApiSite[]> {
   const config = await getConfig();
-  const allApiSites = config.SourceConfig.filter((s) => !s.disabled);
+  const allApiSites = config.SourceConfig.filter((s) => !s.disabled).map((s) => ({
+    ...s,
+    name: decorateCuratedSourceName(s.key, s.name, s.api),
+  }));
 
   if (!user) {
     return allApiSites;
