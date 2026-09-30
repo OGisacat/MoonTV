@@ -1,4 +1,10 @@
-export const DEFAULT_API_SITES = {
+type DefaultApiSite = {
+  api: string;
+  name: string;
+  detail?: string;
+};
+
+export const DEFAULT_API_SITES: Record<string, DefaultApiSite> = {
   dyttzy: {
     api: 'http://caiji.dyttzyapi.com/api.php/provide/vod',
     name: '电影天堂 🔴有插播',
