@@ -2,7 +2,8 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 
-import { authorizeDataApiUser } from '@/lib/data-api-auth';
+import { getAuthInfoFromCookie } from '@/lib/auth';
+import { getConfig } from '@/lib/config';
 import { db } from '@/lib/db';
 import { Favorite } from '@/lib/types';
 
@@ -17,9 +18,25 @@ export const runtime = 'nodejs';
  */
 export async function GET(request: NextRequest) {
   try {
-    const auth = await authorizeDataApiUser(request);
-    if (!auth.ok) return auth.response;
-    const username = auth.username;
+    // 从 cookie 获取用户信息
+    const authInfo = getAuthInfoFromCookie(request);
+    if (!authInfo || !authInfo.username) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const config = await getConfig();
+    if (authInfo.username !== process.env.USERNAME) {
+      // 非站长，检查用户存在或被封禁
+      const user = config.UserConfig.Users.find(
+        (u) => u.username === authInfo.username
+      );
+      if (!user) {
+        return NextResponse.json({ error: '用户不存在' }, { status: 401 });
+      }
+      if (user.banned) {
+        return NextResponse.json({ error: '用户已被封禁' }, { status: 401 });
+      }
+    }
 
     const { searchParams } = new URL(request.url);
     const key = searchParams.get('key');
@@ -33,12 +50,12 @@ export async function GET(request: NextRequest) {
           { status: 400 }
         );
       }
-      const fav = await db.getFavorite(username, source, id);
+      const fav = await db.getFavorite(authInfo.username, source, id);
       return NextResponse.json(fav, { status: 200 });
     }
 
     // 查询全部收藏
-    const favorites = await db.getAllFavorites(username);
+    const favorites = await db.getAllFavorites(authInfo.username);
     return NextResponse.json(favorites, { status: 200 });
   } catch (err) {
     console.error('获取收藏失败', err);
@@ -55,9 +72,25 @@ export async function GET(request: NextRequest) {
  */
 export async function POST(request: NextRequest) {
   try {
-    const auth = await authorizeDataApiUser(request);
-    if (!auth.ok) return auth.response;
-    const username = auth.username;
+    // 从 cookie 获取用户信息
+    const authInfo = getAuthInfoFromCookie(request);
+    if (!authInfo || !authInfo.username) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const config = await getConfig();
+    if (authInfo.username !== process.env.USERNAME) {
+      // 非站长，检查用户存在或被封禁
+      const user = config.UserConfig.Users.find(
+        (u) => u.username === authInfo.username
+      );
+      if (!user) {
+        return NextResponse.json({ error: '用户不存在' }, { status: 401 });
+      }
+      if (user.banned) {
+        return NextResponse.json({ error: '用户已被封禁' }, { status: 401 });
+      }
+    }
 
     const body = await request.json();
     const { key, favorite }: { key: string; favorite: Favorite } = body;
@@ -90,7 +123,7 @@ export async function POST(request: NextRequest) {
       save_time: favorite.save_time ?? Date.now(),
     } as Favorite;
 
-    await db.saveFavorite(username, source, id, finalFavorite);
+    await db.saveFavorite(authInfo.username, source, id, finalFavorite);
 
     return NextResponse.json({ success: true }, { status: 200 });
   } catch (err) {
@@ -110,10 +143,27 @@ export async function POST(request: NextRequest) {
  */
 export async function DELETE(request: NextRequest) {
   try {
-    const auth = await authorizeDataApiUser(request);
-    if (!auth.ok) return auth.response;
-    const username = auth.username;
+    // 从 cookie 获取用户信息
+    const authInfo = getAuthInfoFromCookie(request);
+    if (!authInfo || !authInfo.username) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
 
+    const config = await getConfig();
+    if (authInfo.username !== process.env.USERNAME) {
+      // 非站长，检查用户存在或被封禁
+      const user = config.UserConfig.Users.find(
+        (u) => u.username === authInfo.username
+      );
+      if (!user) {
+        return NextResponse.json({ error: '用户不存在' }, { status: 401 });
+      }
+      if (user.banned) {
+        return NextResponse.json({ error: '用户已被封禁' }, { status: 401 });
+      }
+    }
+
+    const username = authInfo.username;
     const { searchParams } = new URL(request.url);
     const key = searchParams.get('key');
 

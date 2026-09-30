@@ -4,10 +4,11 @@ import { db } from '@/lib/db';
 
 import { AdminConfig } from './admin.types';
 import {
-  CURATED_SOURCE_ADDITIONS,
-  decorateCuratedSourceName,
+  DEFAULT_API_SITES,
+  DEFAULT_CONFIG_FILE,
+  decorateSourceName,
   getSourceHost,
-} from './curated-sources';
+} from './default-sources';
 
 export interface ApiSite {
   key: string;
@@ -202,14 +203,17 @@ async function getInitConfig(configFile: string, subConfig: {
     AutoUpdate: false,
     LastCheck: "",
   }): Promise<AdminConfig> {
+  const effectiveConfigFile = configFile.trim()
+    ? configFile
+    : DEFAULT_CONFIG_FILE;
   let cfgFile: ConfigFileStruct;
   try {
-    cfgFile = JSON.parse(configFile) as ConfigFileStruct;
+    cfgFile = JSON.parse(effectiveConfigFile) as ConfigFileStruct;
   } catch (e) {
     cfgFile = {} as ConfigFileStruct;
   }
   const adminConfig: AdminConfig = {
-    ConfigFile: configFile,
+    ConfigFile: effectiveConfigFile,
     ConfigSubscribtion: subConfig,
     SiteConfig: {
       SiteName: process.env.NEXT_PUBLIC_SITE_NAME || 'MoonTV',
@@ -333,36 +337,76 @@ export async function getConfig(): Promise<AdminConfig> {
     }
     adminConfig = configSelfCheck(adminConfig);
 
-    // MoonTV 自定义精选源：只补缺失项，不覆盖用户已有的同 key / 同域名配置。
-    let addedCuratedSources = false;
+    // 修复 2026-09-30 的源配置迁移问题：
+    // 当数据库只剩下刚新增的精选源时，把旧默认源恢复回来。
+    // 只补缺失项，不覆盖已有 URL、禁用状态或自定义源。
+    let repairedDefaultSources = false;
     const existingKeys = new Set(adminConfig.SourceConfig.map((s) => s.key));
     const existingHosts = new Set(
       adminConfig.SourceConfig.map((s) => getSourceHost(s.api)).filter(Boolean)
     );
+    const curatedKeys = new Set(['hongniu', 'hikan', 'zuid', 'tangren', 'rr789']);
+    const legacyKeys = new Set([
+      'dyttzy',
+      'heimuer',
+      'ruyi',
+      'bfzy',
+      'tyyszy',
+      'ffzy',
+      'zy360',
+      'maotaizy',
+      'wolong',
+      'jisu',
+      'dbzy',
+      'mozhua',
+      'mdzy',
+      'zuid',
+      'yinghua',
+      'wujin',
+      'wwzy',
+      'ikun',
+      'lzi',
+      'xiaomaomi',
+    ]);
+    const curatedCount = adminConfig.SourceConfig.filter((s) =>
+      curatedKeys.has(s.key)
+    ).length;
+    const legacyCount = adminConfig.SourceConfig.filter((s) =>
+      legacyKeys.has(s.key)
+    ).length;
+    const shouldRepairSources =
+      adminConfig.SourceConfig.length <= 6 &&
+      curatedCount >= 4 &&
+      legacyCount <= 2;
 
-    for (const source of CURATED_SOURCE_ADDITIONS) {
-      const sourceHost = getSourceHost(source.api);
-      if (
-        existingKeys.has(source.key) ||
-        (sourceHost && existingHosts.has(sourceHost))
-      ) {
-        continue;
+    if (shouldRepairSources) {
+      for (const [key, source] of Object.entries(DEFAULT_API_SITES)) {
+        const sourceHost = getSourceHost(source.api);
+        if (
+          existingKeys.has(key) ||
+          (sourceHost && existingHosts.has(sourceHost))
+        ) {
+          continue;
+        }
+
+        adminConfig.SourceConfig.push({
+          key,
+          name: source.name,
+          api: source.api,
+          detail: source.detail,
+          from: 'config',
+          disabled: false,
+        });
+        existingKeys.add(key);
+        if (sourceHost) existingHosts.add(sourceHost);
+        repairedDefaultSources = true;
       }
-
-      adminConfig.SourceConfig.push({
-        ...source,
-        from: 'custom',
-        disabled: false,
-      });
-      existingKeys.add(source.key);
-      if (sourceHost) existingHosts.add(sourceHost);
-      addedCuratedSources = true;
     }
 
     cachedConfig = adminConfig;
     cachedConfigAt = Date.now();
-    // 首次初始化或补入精选源时回写；普通缓存刷新不产生额外写入。
-    if (needInit || addedCuratedSources) {
+    // 首次初始化或执行一次源恢复时回写；普通缓存刷新不产生额外写入。
+    if (needInit || repairedDefaultSources) {
       try {
         await db.saveAdminConfig(cachedConfig);
       } catch (e) {
@@ -485,7 +529,7 @@ export async function getAvailableApiSites(user?: string): Promise<ApiSite[]> {
   const config = await getConfig();
   const allApiSites = config.SourceConfig.filter((s) => !s.disabled).map((s) => ({
     ...s,
-    name: decorateCuratedSourceName(s.key, s.name, s.api),
+    name: decorateSourceName(s.key, s.name, s.api),
   }));
 
   if (!user) {

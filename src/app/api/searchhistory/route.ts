@@ -2,7 +2,8 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 
-import { authorizeDataApiUser } from '@/lib/data-api-auth';
+import { getAuthInfoFromCookie } from '@/lib/auth';
+import { getConfig } from '@/lib/config';
 import { db } from '@/lib/db';
 
 export const runtime = 'nodejs';
@@ -16,11 +17,27 @@ const HISTORY_LIMIT = 20;
  */
 export async function GET(request: NextRequest) {
   try {
-    const auth = await authorizeDataApiUser(request);
-    if (!auth.ok) return auth.response;
-    const username = auth.username;
+    // 从 cookie 获取用户信息
+    const authInfo = getAuthInfoFromCookie(request);
+    if (!authInfo || !authInfo.username) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
 
-    const history = await db.getSearchHistory(username);
+    const config = await getConfig();
+    if (authInfo.username !== process.env.USERNAME) {
+      // 非站长，检查用户存在或被封禁
+      const user = config.UserConfig.Users.find(
+        (u) => u.username === authInfo.username
+      );
+      if (!user) {
+        return NextResponse.json({ error: '用户不存在' }, { status: 401 });
+      }
+      if (user.banned) {
+        return NextResponse.json({ error: '用户已被封禁' }, { status: 401 });
+      }
+    }
+
+    const history = await db.getSearchHistory(authInfo.username);
     return NextResponse.json(history, { status: 200 });
   } catch (err) {
     console.error('获取搜索历史失败', err);
@@ -37,9 +54,25 @@ export async function GET(request: NextRequest) {
  */
 export async function POST(request: NextRequest) {
   try {
-    const auth = await authorizeDataApiUser(request);
-    if (!auth.ok) return auth.response;
-    const username = auth.username;
+    // 从 cookie 获取用户信息
+    const authInfo = getAuthInfoFromCookie(request);
+    if (!authInfo || !authInfo.username) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const config = await getConfig();
+    if (authInfo.username !== process.env.USERNAME) {
+      // 非站长，检查用户存在或被封禁
+      const user = config.UserConfig.Users.find(
+        (u) => u.username === authInfo.username
+      );
+      if (!user) {
+        return NextResponse.json({ error: '用户不存在' }, { status: 401 });
+      }
+      if (user.banned) {
+        return NextResponse.json({ error: '用户已被封禁' }, { status: 401 });
+      }
+    }
 
     const body = await request.json();
     const keyword: string = body.keyword?.trim();
@@ -51,10 +84,10 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    await db.addSearchHistory(username, keyword);
+    await db.addSearchHistory(authInfo.username, keyword);
 
     // 再次获取最新列表，确保客户端与服务端同步
-    const history = await db.getSearchHistory(username);
+    const history = await db.getSearchHistory(authInfo.username);
     return NextResponse.json(history.slice(0, HISTORY_LIMIT), { status: 200 });
   } catch (err) {
     console.error('添加搜索历史失败', err);
@@ -73,14 +106,30 @@ export async function POST(request: NextRequest) {
  */
 export async function DELETE(request: NextRequest) {
   try {
-    const auth = await authorizeDataApiUser(request);
-    if (!auth.ok) return auth.response;
-    const username = auth.username;
+    // 从 cookie 获取用户信息
+    const authInfo = getAuthInfoFromCookie(request);
+    if (!authInfo || !authInfo.username) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const config = await getConfig();
+    if (authInfo.username !== process.env.USERNAME) {
+      // 非站长，检查用户存在或被封禁
+      const user = config.UserConfig.Users.find(
+        (u) => u.username === authInfo.username
+      );
+      if (!user) {
+        return NextResponse.json({ error: '用户不存在' }, { status: 401 });
+      }
+      if (user.banned) {
+        return NextResponse.json({ error: '用户已被封禁' }, { status: 401 });
+      }
+    }
 
     const { searchParams } = new URL(request.url);
     const kw = searchParams.get('keyword')?.trim();
 
-    await db.deleteSearchHistory(username, kw || undefined);
+    await db.deleteSearchHistory(authInfo.username, kw || undefined);
 
     return NextResponse.json({ success: true }, { status: 200 });
   } catch (err) {
