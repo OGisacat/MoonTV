@@ -1719,6 +1719,24 @@ function PlayPageClient() {
         // HLS 支持配置
         customType: {
           m3u8: function (video: HTMLVideoElement, url: string) {
+            // iPhone/iPad Safari 原生 HLS 对 HEVC/H.265 等 Apple 平台编码
+            // 兼容性更好。部分源走 hls.js/MSE 时会出现“有声音无画面”，
+            // 因此 iOS 优先交给系统原生播放器解码。
+            if (
+              isIOSMobile &&
+              video.canPlayType('application/vnd.apple.mpegurl')
+            ) {
+              if (video.hls) {
+                video.hls.destroy();
+                video.hls = undefined;
+              }
+
+              video.src = url;
+              ensureVideoSource(video, url);
+              video.load();
+              return;
+            }
+
             if (!Hls) {
               console.error('HLS.js 未加载');
               return;
